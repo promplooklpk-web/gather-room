@@ -2,18 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Peer, { DataConnection, MediaConnection } from "peerjs";
+import {
+  PEER_OPTIONS,
+  ROOM_HOST_ID,
+  SCREEN_CALL_META,
+  isTransientPeerError,
+  makeGuestPeerId,
+} from "@/lib/peerConfig";
 import { MOVE_SPEED, SPAWN, canMoveTo, pickColor } from "@/lib/room";
 import type { PeerInfo, PlayerState, SignalingMessage } from "@/lib/types";
 import { ROOM_ID } from "@/lib/types";
 
-const PEER_OPTIONS = {
-  host: "0.peerjs.com",
-  port: 443,
-  path: "/",
-  secure: true,
-};
-
-const SCREEN_CALL_META = { type: "screen" as const };
+const HOST_CONNECT_MAX_ATTEMPTS = 20;
+const HOST_CONNECT_INTERVAL_MS = 1500;
 
 interface RemotePeer {
   info: PeerInfo;
@@ -59,6 +60,8 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
   const connectToPeerRef = useRef<(remoteId: string) => void>(() => {});
   const stopScreenShareRef = useRef<() => void>(() => {});
   const startScreenCallsRef = useRef<() => void>(() => {});
+  const hostConnectTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopHostConnectRetryRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     nameRef.current = name;
@@ -288,6 +291,13 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
       remote.conn = conn;
 
       conn.on("open", () => {
+        if (conn.peer === ROOM_HOST_ID) {
+          stopHostConnectRetryRef.current();
+          setError((prev) =>
+            prev?.startsWith("เชื่อมต่อไม่สำเร็จ") ? null : prev
+          );
+        }
+
         if (!isHostRef.current && myIdRef.current) {
           conn.send({
             type: "hello",
@@ -431,50 +441,62 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
     startScreenCallsRef.current = startScreenCallsToAll;
   });
 
+  const startHostConnectRetry = useCallback(() => {
+    if (hostConnectTimerRef.current) return;
+
+    let attempts = 0;
+    hostConnectTimerRef.current = setInterval(() => {
+      if (!peerRef.current || isHostRef.current) {
+        if (hostConnectTimerRef.current) {
+          clearInterval(hostConnectTimerRef.current);
+          hostConnectTimerRef.current = null;
+        }
+        return;
+      }
+
+      const hostConn = remotesRef.current.get(ROOM_HOST_ID);
+      if (hostConn?.conn?.open) {
+        if (hostConnectTimerRef.current) {
+          clearInterval(hostConnectTimerRef.current);
+          hostConnectTimerRef.current = null;
+        }
+        setError((prev) =>
+          prev?.startsWith("เชื่อมต่อไม่สำเร็จ") ? null : prev
+        );
+        return;
+      }
+
+      attempts += 1;
+      connectToPeerRef.current(ROOM_HOST_ID);
+
+      if (attempts >= HOST_CONNECT_MAX_ATTEMPTS) {
+        if (hostConnectTimerRef.current) {
+          clearInterval(hostConnectTimerRef.current);
+          hostConnectTimerRef.current = null;
+        }
+        setError("เชื่อมต่อไม่สำเร็จ / Connection failed. ลองรีเฟรชหน้า");
+      }
+    }, HOST_CONNECT_INTERVAL_MS);
+  }, []);
+
+  const stopHostConnectRetry = useCallback(() => {
+    if (hostConnectTimerRef.current) {
+      clearInterval(hostConnectTimerRef.current);
+      hostConnectTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    stopHostConnectRetryRef.current = stopHostConnectRetry;
+  });
+
   useEffect(() => {
     if (!enabled || !name) return;
 
     let destroyed = false;
     const remotes = remotesRef.current;
 
-    async function init() {
-      try {
-        localStreamRef.current = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: false,
-        });
-      } catch {
-        setError(
-          "ไม่สามารถใช้ไมค์ได้ — กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์ / Microphone access denied. Please allow mic permission."
-        );
-      }
-
-      const existingHost = new URLSearchParams(window.location.search).get("host");
-      const peerId = `gather-${ROOM_ID}-${Math.random().toString(36).slice(2, 8)}`;
-      const peer = new Peer(peerId, PEER_OPTIONS);
-      peerRef.current = peer;
-
-      peer.on("open", (id) => {
-        if (destroyed) return;
-        myIdRef.current = id;
-        setMyId(id);
-
-        if (!existingHost) {
-          isHostRef.current = true;
-          setIsHost(true);
-          hostIdRef.current = id;
-          const url = new URL(window.location.href);
-          url.searchParams.set("host", id);
-          window.history.replaceState({}, "", url.toString());
-        } else {
-          hostIdRef.current = existingHost;
-          connectToPeerRef.current(existingHost);
-        }
-
-        announceJoin(id);
-        setConnected(true);
-      });
-
+    function attachPeerHandlers(peer: Peer) {
       peer.on("connection", (conn) => setupDataConnectionRef.current(conn));
 
       peer.on("call", (call) => {
@@ -493,7 +515,84 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
 
       peer.on("error", (err) => {
         console.error("Peer error:", err);
-        if (err.type !== "unavailable-id") {
+        if (isTransientPeerError(err)) return;
+        setError("เชื่อมต่อไม่สำเร็จ / Connection failed. ลองรีเฟรชหน้า");
+      });
+    }
+
+    function onPeerReady(id: string, asHost: boolean) {
+      if (destroyed) return;
+
+      myIdRef.current = id;
+      setMyId(id);
+      isHostRef.current = asHost;
+      setIsHost(asHost);
+      hostIdRef.current = ROOM_HOST_ID;
+
+      announceJoin(id);
+      setConnected(true);
+
+      if (!asHost) {
+        connectToPeerRef.current(ROOM_HOST_ID);
+        startHostConnectRetry();
+      }
+    }
+
+    function openGuestPeer(): void {
+      if (destroyed) return;
+
+      const guestId = makeGuestPeerId(ROOM_ID);
+      const peer = new Peer(guestId, PEER_OPTIONS);
+      peerRef.current = peer;
+      attachPeerHandlers(peer);
+
+      peer.on("open", (id) => onPeerReady(id, false));
+
+      peer.on("error", (err) => {
+        console.error("Guest peer error:", err);
+        if (err.type === "unavailable-id" && !destroyed) {
+          peer.destroy();
+          openGuestPeer();
+          return;
+        }
+        if (!isTransientPeerError(err)) {
+          setError("เชื่อมต่อไม่สำเร็จ / Connection failed. ลองรีเฟรชหน้า");
+        }
+      });
+    }
+
+    async function init() {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("host")) {
+        url.searchParams.delete("host");
+        window.history.replaceState({}, "", url.toString());
+      }
+
+      try {
+        localStreamRef.current = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: false,
+        });
+      } catch {
+        setError(
+          "ไม่สามารถใช้ไมค์ได้ — กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์ / Microphone access denied. Please allow mic permission."
+        );
+      }
+
+      const hostPeer = new Peer(ROOM_HOST_ID, PEER_OPTIONS);
+      peerRef.current = hostPeer;
+      attachPeerHandlers(hostPeer);
+
+      hostPeer.on("open", (id) => onPeerReady(id, true));
+
+      hostPeer.on("error", (err) => {
+        console.error("Host peer error:", err);
+        if (err.type === "unavailable-id") {
+          hostPeer.destroy();
+          openGuestPeer();
+          return;
+        }
+        if (!isTransientPeerError(err)) {
           setError("เชื่อมต่อไม่สำเร็จ / Connection failed. ลองรีเฟรชหน้า");
         }
       });
@@ -503,6 +602,7 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
 
     return () => {
       destroyed = true;
+      stopHostConnectRetry();
       cancelAnimationFrame(animationRef.current);
       remotes.forEach((remote) => {
         remote.conn?.close();
@@ -516,7 +616,15 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
       peerRef.current?.destroy();
       peerRef.current = null;
     };
-  }, [enabled, name, announceJoin, setupAudioCall, setupScreenReceiveCall]);
+  }, [
+    enabled,
+    name,
+    announceJoin,
+    setupAudioCall,
+    setupScreenReceiveCall,
+    startHostConnectRetry,
+    stopHostConnectRetry,
+  ]);
 
   useEffect(() => {
     if (!enabled || !connected) return;
@@ -642,9 +750,8 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
   }, []);
 
   const getShareUrl = useCallback(() => {
-    const host = hostIdRef.current || myIdRef.current;
     const url = new URL(window.location.href);
-    if (host) url.searchParams.set("host", host);
+    url.searchParams.delete("host");
     return url.toString();
   }, []);
 

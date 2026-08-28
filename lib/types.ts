@@ -24,3 +24,6 @@ export interface PeerInfo {
 }
 
 export const ROOM_ID = "default";
+
+/** Fixed PeerJS id for the single shared room — first joiner claims it as coordinator. */
+export const ROOM_HOST_ID = `gather-${ROOM_ID}-host`;
