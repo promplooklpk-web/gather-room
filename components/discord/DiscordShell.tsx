@@ -99,7 +99,7 @@ function VoiceRoomSession({
       <ChannelSidebar
         rooms={rooms}
         activeRoomId={roomId}
-        activeRoomLabel={roomLabel}
+        userPanelRoomLabel={room.label}
         players={players}
         myId={myId}
         connected={connected}

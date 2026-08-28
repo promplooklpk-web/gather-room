@@ -9,7 +9,7 @@ import { initialFromName } from "@/lib/colors";
 interface ChannelSidebarProps {
   rooms: VoiceRoom[];
   activeRoomId: string;
-  activeRoomLabel: string;
+  userPanelRoomLabel: string;
   players: PlayerState[];
   myId: string | null;
   connected: boolean;
@@ -30,7 +30,7 @@ interface ChannelSidebarProps {
 export function ChannelSidebar({
   rooms,
   activeRoomId,
-  activeRoomLabel,
+  userPanelRoomLabel,
   players,
   myId,
   connected,
@@ -115,7 +115,7 @@ export function ChannelSidebar({
         isMuted={isMuted}
         isDeafened={isDeafened}
         isSharing={isSharing}
-        roomLabel={activeRoomLabel}
+        roomLabel={userPanelRoomLabel}
         onToggleMute={onToggleMute}
         onToggleDeafen={onToggleDeafen}
         onStartShare={onStartShare}

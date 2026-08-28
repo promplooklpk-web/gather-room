@@ -39,16 +39,22 @@ export function ParticipantTiles({
         return (
           <div
             key={p.id}
-            className={`relative overflow-hidden rounded-lg bg-[#2b2d31] ${
+            className={`relative overflow-hidden rounded-lg bg-[#1e1f22] ring-1 ring-black/40 ${
               compact
                 ? "h-[72px] w-[128px]"
-                : "min-h-[140px] min-w-[180px] flex-1 basis-[180px]"
+                : players.length === 1
+                  ? "aspect-video w-[min(100%,760px)] min-h-[280px]"
+                  : "aspect-video min-h-[180px] min-w-[240px] flex-1 basis-[280px] max-w-[520px]"
             }`}
           >
             <div className="flex h-full w-full flex-col items-center justify-center gap-2">
               <div
                 className={`flex items-center justify-center rounded-full font-bold text-white ${
-                  compact ? "h-10 w-10 text-base" : "h-16 w-16 text-2xl"
+                  compact
+                    ? "h-10 w-10 text-base"
+                    : players.length === 1
+                      ? "h-24 w-24 text-4xl"
+                      : "h-16 w-16 text-2xl"
                 }`}
                 style={{ backgroundColor: p.color }}
               >
@@ -136,11 +142,11 @@ export function ScreenStage({
 
   if (!showingShare) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-24 pt-6">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-28 pt-6">
         {players.length === 0 ? (
           <p className="text-sm text-[#949ba4]">{t.waitingForPeople}</p>
         ) : (
-          <div className="w-full max-w-4xl">
+          <div className="flex w-full max-w-5xl justify-center">
             <ParticipantTiles
               players={players}
               myId={myId}
