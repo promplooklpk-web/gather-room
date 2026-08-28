@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
@@ -12,16 +12,43 @@ import {
   AVATAR_RADIUS,
 } from "@/lib/room";
 import type { PlayerState } from "@/lib/types";
+import { RemoteVideo } from "@/components/RemoteVideo";
 
 interface GameCanvasProps {
   players: PlayerState[];
   myId: string | null;
   remoteScreen: MediaStream | null;
+  onTapWalk?: (x: number, y: number) => void;
 }
 
-export function GameCanvas({ players, myId, remoteScreen }: GameCanvasProps) {
+export function GameCanvas({
+  players,
+  myId,
+  remoteScreen,
+  onTapWalk,
+}: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const screenVideoRef = useRef<HTMLVideoElement | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const clientToWorld = useCallback((clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = CANVAS_WIDTH / rect.width;
+    const scaleY = CANVAS_HEIGHT / rect.height;
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
+    };
+  }, []);
+
+  const handleTap = useCallback(
+    (clientX: number, clientY: number) => {
+      const world = clientToWorld(clientX, clientY);
+      if (world && onTapWalk) onTapWalk(world.x, world.y);
+    },
+    [clientToWorld, onTapWalk]
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -34,7 +61,6 @@ export function GameCanvas({ players, myId, remoteScreen }: GameCanvasProps) {
     const draw = () => {
       ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-      // Floor
       for (let y = 0; y < MAP_HEIGHT; y++) {
         for (let x = 0; x < MAP_WIDTH; x++) {
           const tile = MAP[y][x];
@@ -57,7 +83,6 @@ export function GameCanvas({ players, myId, remoteScreen }: GameCanvasProps) {
         }
       }
 
-      // Screen on wall
       ctx.fillStyle = "#0f0f1a";
       ctx.fillRect(
         SCREEN_WALL.x,
@@ -65,7 +90,7 @@ export function GameCanvas({ players, myId, remoteScreen }: GameCanvasProps) {
         SCREEN_WALL.width,
         SCREEN_WALL.height
       );
-      ctx.strokeStyle = "#4a90d9";
+      ctx.strokeStyle = remoteScreen ? "#22c55e" : "#4a90d9";
       ctx.lineWidth = 3;
       ctx.strokeRect(
         SCREEN_WALL.x,
@@ -74,19 +99,7 @@ export function GameCanvas({ players, myId, remoteScreen }: GameCanvasProps) {
         SCREEN_WALL.height
       );
 
-      if (remoteScreen && screenVideoRef.current) {
-        try {
-          ctx.drawImage(
-            screenVideoRef.current,
-            SCREEN_WALL.x + 2,
-            SCREEN_WALL.y + 2,
-            SCREEN_WALL.width - 4,
-            SCREEN_WALL.height - 4
-          );
-        } catch {
-          // video not ready
-        }
-      } else {
+      if (!remoteScreen) {
         ctx.fillStyle = "#4a90d9";
         ctx.font = "11px sans-serif";
         ctx.textAlign = "center";
@@ -97,7 +110,6 @@ export function GameCanvas({ players, myId, remoteScreen }: GameCanvasProps) {
         );
       }
 
-      // Desks (decorative)
       const desks = [
         { x: 2, y: 3 },
         { x: 12, y: 3 },
@@ -114,11 +126,9 @@ export function GameCanvas({ players, myId, remoteScreen }: GameCanvasProps) {
         );
       });
 
-      // Players
       players.forEach((player) => {
         const isMe = player.id === myId;
 
-        // Shadow
         ctx.beginPath();
         ctx.ellipse(
           player.x,
@@ -132,7 +142,6 @@ export function GameCanvas({ players, myId, remoteScreen }: GameCanvasProps) {
         ctx.fillStyle = "rgba(0,0,0,0.3)";
         ctx.fill();
 
-        // Body
         ctx.beginPath();
         ctx.arc(player.x, player.y, AVATAR_RADIUS, 0, Math.PI * 2);
         ctx.fillStyle = player.color;
@@ -141,7 +150,6 @@ export function GameCanvas({ players, myId, remoteScreen }: GameCanvasProps) {
         ctx.lineWidth = isMe ? 3 : 1.5;
         ctx.stroke();
 
-        // Name tag
         ctx.font = "bold 11px sans-serif";
         ctx.textAlign = "center";
         const label = isMe ? `${player.name} ★` : player.name;
@@ -158,7 +166,11 @@ export function GameCanvas({ players, myId, remoteScreen }: GameCanvasProps) {
 
         if (player.isSharingScreen) {
           ctx.font = "14px sans-serif";
-          ctx.fillText("🖥️", player.x + AVATAR_RADIUS - 4, player.y - AVATAR_RADIUS + 4);
+          ctx.fillText(
+            "🖥️",
+            player.x + AVATAR_RADIUS - 4,
+            player.y - AVATAR_RADIUS + 4
+          );
         }
       });
 
@@ -169,28 +181,48 @@ export function GameCanvas({ players, myId, remoteScreen }: GameCanvasProps) {
     return () => cancelAnimationFrame(frameId);
   }, [players, myId, remoteScreen]);
 
-  useEffect(() => {
-    if (!screenVideoRef.current) {
-      screenVideoRef.current = document.createElement("video");
-      screenVideoRef.current.muted = true;
-      screenVideoRef.current.playsInline = true;
-    }
-    const video = screenVideoRef.current;
-    if (remoteScreen) {
-      video.srcObject = remoteScreen;
-      video.play().catch(() => {});
-    } else {
-      video.srcObject = null;
-    }
-  }, [remoteScreen]);
+  const wallLeft = `${(SCREEN_WALL.x / CANVAS_WIDTH) * 100}%`;
+  const wallTop = `${(SCREEN_WALL.y / CANVAS_HEIGHT) * 100}%`;
+  const wallWidth = `${(SCREEN_WALL.width / CANVAS_WIDTH) * 100}%`;
+  const wallHeight = `${(SCREEN_WALL.height / CANVAS_HEIGHT) * 100}%`;
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={CANVAS_WIDTH}
-      height={CANVAS_HEIGHT}
-      className="rounded-lg border-2 border-emerald-700/50 shadow-xl"
-      style={{ imageRendering: "pixelated" }}
-    />
+    <div
+      ref={containerRef}
+      className="relative touch-none select-none"
+      style={{ touchAction: "none" }}
+      onPointerDown={(e) => {
+        if (e.pointerType === "touch" && e.target === canvasRef.current) {
+          handleTap(e.clientX, e.clientY);
+        }
+      }}
+    >
+      <canvas
+        ref={canvasRef}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
+        className="max-w-full rounded-lg border-2 border-emerald-700/50 shadow-xl"
+        style={{ imageRendering: "pixelated", width: "100%", height: "auto" }}
+        onClick={(e) => handleTap(e.clientX, e.clientY)}
+      />
+
+      {remoteScreen && (
+        <div
+          className="pointer-events-none absolute overflow-hidden rounded-sm border border-emerald-400/50"
+          style={{
+            left: wallLeft,
+            top: wallTop,
+            width: wallWidth,
+            height: wallHeight,
+          }}
+        >
+          <RemoteVideo
+            stream={remoteScreen}
+            className="h-full w-full"
+            label="Screen on wall"
+          />
+        </div>
+      )}
+    </div>
   );
 }

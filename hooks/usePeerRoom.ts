@@ -13,12 +13,14 @@ const PEER_OPTIONS = {
   secure: true,
 };
 
+const SCREEN_CALL_META = { type: "screen" as const };
+
 interface RemotePeer {
   info: PeerInfo;
   conn?: DataConnection;
-  call?: MediaConnection;
+  audioCall?: MediaConnection;
+  screenCall?: MediaConnection;
   audioEl?: HTMLAudioElement;
-  screenStream?: MediaStream;
 }
 
 interface UsePeerRoomOptions {
@@ -47,6 +49,8 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
   const myColorRef = useRef("");
   const positionRef = useRef({ x: SPAWN.x, y: SPAWN.y });
   const keysRef = useRef<Set<string>>(new Set());
+  const touchInputRef = useRef({ x: 0, y: 0 });
+  const walkTargetRef = useRef<{ x: number; y: number } | null>(null);
   const hostIdRef = useRef<string | null>(null);
   const isHostRef = useRef(false);
   const myIdRef = useRef<string | null>(null);
@@ -54,6 +58,7 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
   const animationRef = useRef<number>(0);
   const connectToPeerRef = useRef<(remoteId: string) => void>(() => {});
   const stopScreenShareRef = useRef<() => void>(() => {});
+  const startScreenCallsRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     nameRef.current = name;
@@ -89,6 +94,31 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
     });
   }, []);
 
+  const getRemoteName = useCallback((peerId: string) => {
+    const remote = remotesRef.current.get(peerId);
+    return remote?.info.name ?? "???";
+  }, []);
+
+  const attachRemoteScreen = useCallback(
+    (peerId: string, stream: MediaStream) => {
+      setRemoteScreen({
+        peerId,
+        name: getRemoteName(peerId),
+        stream,
+      });
+      updatePlayer(peerId, { isSharingScreen: true });
+    },
+    [getRemoteName, updatePlayer]
+  );
+
+  const clearRemoteScreen = useCallback(
+    (peerId: string) => {
+      setRemoteScreen((prev) => (prev?.peerId === peerId ? null : prev));
+      updatePlayer(peerId, { isSharingScreen: false });
+    },
+    [updatePlayer]
+  );
+
   const removePlayer = useCallback((peerId: string) => {
     setPlayers((prev) => {
       const next = { ...prev };
@@ -100,13 +130,14 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
       remote.audioEl.srcObject = null;
       remote.audioEl.remove();
     }
-    remote?.call?.close();
+    remote?.audioCall?.close();
+    remote?.screenCall?.close();
     remote?.conn?.close();
     remotesRef.current.delete(peerId);
     setRemoteScreen((prev) => (prev?.peerId === peerId ? null : prev));
   }, []);
 
-  const setupMediaCall = useCallback(
+  const setupAudioCall = useCallback(
     (call: MediaConnection) => {
       const remoteId = call.peer;
       let remote = remotesRef.current.get(remoteId);
@@ -122,41 +153,57 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
         };
         remotesRef.current.set(remoteId, remote);
       }
-      remote.call = call;
+      remote.audioCall = call;
 
       call.on("stream", (remoteStream) => {
-        const videoTracks = remoteStream.getVideoTracks();
         const audioTracks = remoteStream.getAudioTracks();
+        if (audioTracks.length === 0) return;
 
-        if (videoTracks.length > 0) {
-          remote!.screenStream = remoteStream;
-          setRemoteScreen({
-            peerId: remoteId,
-            name: remote!.info.name,
-            stream: remoteStream,
-          });
-          updatePlayer(remoteId, { isSharingScreen: true });
+        if (!remote!.audioEl) {
+          const audio = document.createElement("audio");
+          audio.autoplay = true;
+          document.body.appendChild(audio);
+          remote!.audioEl = audio;
         }
-
-        if (audioTracks.length > 0) {
-          if (!remote!.audioEl) {
-            const audio = document.createElement("audio");
-            audio.autoplay = true;
-            document.body.appendChild(audio);
-            remote!.audioEl = audio;
-          }
-          remote!.audioEl!.srcObject = new MediaStream(audioTracks);
-        }
+        remote!.audioEl!.srcObject = new MediaStream(audioTracks);
+        void remote!.audioEl!.play().catch(() => {});
       });
 
       call.on("close", () => {
-        if (remote?.screenStream) {
-          setRemoteScreen((prev) => (prev?.peerId === remoteId ? null : prev));
-          updatePlayer(remoteId, { isSharingScreen: false });
-        }
+        remote!.audioCall = undefined;
       });
     },
-    [updatePlayer]
+    []
+  );
+
+  const setupScreenReceiveCall = useCallback(
+    (call: MediaConnection) => {
+      const remoteId = call.peer;
+      let remote = remotesRef.current.get(remoteId);
+      if (!remote) {
+        remote = {
+          info: {
+            id: remoteId,
+            name: "???",
+            color: pickColor(remoteId.length),
+            x: SPAWN.x,
+            y: SPAWN.y,
+          },
+        };
+        remotesRef.current.set(remoteId, remote);
+      }
+
+      call.on("stream", (remoteStream) => {
+        const videoTracks = remoteStream.getVideoTracks();
+        if (videoTracks.length === 0) return;
+        attachRemoteScreen(remoteId, remoteStream);
+      });
+
+      call.on("close", () => {
+        clearRemoteScreen(remoteId);
+      });
+    },
+    [attachRemoteScreen, clearRemoteScreen]
   );
 
   const setupDataConnectionRef = useRef<(conn: DataConnection) => void>(() => {});
@@ -214,14 +261,12 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
         case "screen-share":
           updatePlayer(msg.peerId, { isSharingScreen: msg.isSharing });
           if (!msg.isSharing) {
-            setRemoteScreen((prev) =>
-              prev?.peerId === msg.peerId ? null : prev
-            );
+            clearRemoteScreen(msg.peerId);
           }
           break;
       }
     },
-    [broadcast, updatePlayer, removePlayer]
+    [broadcast, updatePlayer, removePlayer, clearRemoteScreen]
   );
 
   const setupDataConnection = useCallback(
@@ -271,6 +316,33 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
     [broadcast, handleSignalingMessage, removePlayer]
   );
 
+  const startScreenCallToPeer = useCallback((remoteId: string) => {
+    const peer = peerRef.current;
+    const screenStream = screenStreamRef.current;
+    if (!peer || !screenStream) return;
+
+    const remote = remotesRef.current.get(remoteId);
+    if (!remote) return;
+
+    remote.screenCall?.close();
+    const call = peer.call(remoteId, screenStream, { metadata: SCREEN_CALL_META });
+    if (!call) return;
+
+    remote.screenCall = call;
+    call.on("close", () => {
+      if (remote.screenCall === call) remote.screenCall = undefined;
+    });
+    call.on("error", () => {
+      if (remote.screenCall === call) remote.screenCall = undefined;
+    });
+  }, []);
+
+  const startScreenCallsToAll = useCallback(() => {
+    remotesRef.current.forEach((remote) => {
+      startScreenCallToPeer(remote.info.id);
+    });
+  }, [startScreenCallToPeer]);
+
   const connectToPeer = useCallback(
     (remoteId: string) => {
       if (!peerRef.current || remoteId === myIdRef.current) return;
@@ -279,12 +351,15 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
       if (!remotesRef.current.get(remoteId)?.conn?.open) {
         setupDataConnection(peer.connect(remoteId, { reliable: true }));
       }
-      if (localStreamRef.current && !remotesRef.current.get(remoteId)?.call) {
+      if (localStreamRef.current && !remotesRef.current.get(remoteId)?.audioCall) {
         const call = peer.call(remoteId, localStreamRef.current);
-        if (call) setupMediaCall(call);
+        if (call) setupAudioCall(call);
+      }
+      if (screenStreamRef.current) {
+        startScreenCallToPeer(remoteId);
       }
     },
-    [setupDataConnection, setupMediaCall]
+    [setupDataConnection, setupAudioCall, startScreenCallToPeer]
   );
 
   const announceJoin = useCallback((peerId: string) => {
@@ -306,10 +381,8 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
     screenStreamRef.current = null;
 
     remotesRef.current.forEach((remote) => {
-      const videoSender = remote.call?.peerConnection
-        ?.getSenders()
-        .find((s) => s.track?.kind === "video");
-      if (videoSender) videoSender.replaceTrack(null);
+      remote.screenCall?.close();
+      remote.screenCall = undefined;
     });
 
     setIsSharing(false);
@@ -323,10 +396,39 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
     }
   }, [broadcast, updatePlayer]);
 
+  const startScreenShare = useCallback(async () => {
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 15 },
+        audio: false,
+      });
+      screenStreamRef.current = screenStream;
+      const videoTrack = screenStream.getVideoTracks()[0];
+      videoTrack.onended = () => stopScreenShareRef.current();
+
+      startScreenCallsToAll();
+
+      setIsSharing(true);
+      if (myIdRef.current) {
+        broadcast({
+          type: "screen-share",
+          peerId: myIdRef.current,
+          isSharing: true,
+        });
+        updatePlayer(myIdRef.current, { isSharingScreen: true });
+      }
+    } catch {
+      setError(
+        "ไม่สามารถแชร์หน้าจอได้ — กรุณาอนุญาตการแชร์หน้าจอ / Screen share denied. Please allow screen sharing."
+      );
+    }
+  }, [broadcast, startScreenCallsToAll, updatePlayer]);
+
   useEffect(() => {
     setupDataConnectionRef.current = setupDataConnection;
     connectToPeerRef.current = connectToPeer;
     stopScreenShareRef.current = stopScreenShare;
+    startScreenCallsRef.current = startScreenCallsToAll;
   });
 
   useEffect(() => {
@@ -376,9 +478,17 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
       peer.on("connection", (conn) => setupDataConnectionRef.current(conn));
 
       peer.on("call", (call) => {
-        const stream = screenStreamRef.current || localStreamRef.current;
-        if (stream) call.answer(stream);
-        setupMediaCall(call);
+        const meta = call.metadata as { type?: string } | undefined;
+        const answerStream = localStreamRef.current ?? new MediaStream();
+
+        if (meta?.type === "screen") {
+          call.answer(answerStream);
+          setupScreenReceiveCall(call);
+          return;
+        }
+
+        call.answer(answerStream);
+        setupAudioCall(call);
       });
 
       peer.on("error", (err) => {
@@ -396,7 +506,8 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
       cancelAnimationFrame(animationRef.current);
       remotes.forEach((remote) => {
         remote.conn?.close();
-        remote.call?.close();
+        remote.audioCall?.close();
+        remote.screenCall?.close();
         remote.audioEl?.remove();
       });
       remotes.clear();
@@ -405,24 +516,60 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
       peerRef.current?.destroy();
       peerRef.current = null;
     };
-  }, [enabled, name, announceJoin, setupDataConnection, setupMediaCall]);
+  }, [enabled, name, announceJoin, setupAudioCall, setupScreenReceiveCall]);
 
   useEffect(() => {
     if (!enabled || !connected) return;
 
     let lastSent = 0;
     const tick = () => {
-      const keys = keysRef.current;
       let dx = 0;
       let dy = 0;
+
+      const keys = keysRef.current;
       if (keys.has("w") || keys.has("arrowup")) dy -= MOVE_SPEED;
       if (keys.has("s") || keys.has("arrowdown")) dy += MOVE_SPEED;
       if (keys.has("a") || keys.has("arrowleft")) dx -= MOVE_SPEED;
       if (keys.has("d") || keys.has("arrowright")) dx += MOVE_SPEED;
 
+      const touch = touchInputRef.current;
+      if (touch.x !== 0 || touch.y !== 0) {
+        const len = Math.hypot(touch.x, touch.y);
+        if (len > 0.15) {
+          dx += (touch.x / len) * MOVE_SPEED;
+          dy += (touch.y / len) * MOVE_SPEED;
+        }
+      }
+
+      const target = walkTargetRef.current;
+      if (target) {
+        const { x, y } = positionRef.current;
+        const distX = target.x - x;
+        const distY = target.y - y;
+        const dist = Math.hypot(distX, distY);
+        if (dist < MOVE_SPEED * 1.5) {
+          if (canMoveTo(target.x, target.y)) {
+            positionRef.current.x = target.x;
+            positionRef.current.y = target.y;
+          }
+          walkTargetRef.current = null;
+        } else {
+          dx += (distX / dist) * MOVE_SPEED;
+          dy += (distY / dist) * MOVE_SPEED;
+        }
+      }
+
       const { x, y } = positionRef.current;
       if (dx !== 0 && canMoveTo(x + dx, y)) positionRef.current.x += dx;
       if (dy !== 0 && canMoveTo(x, y + dy)) positionRef.current.y += dy;
+
+      if (walkTargetRef.current) {
+        const { x: nx, y: ny } = positionRef.current;
+        const t = walkTargetRef.current;
+        if (Math.hypot(t.x - nx, t.y - ny) < MOVE_SPEED * 2) {
+          if (!canMoveTo(nx + dx, ny + dy)) walkTargetRef.current = null;
+        }
+      }
 
       if (myIdRef.current) {
         const id = myIdRef.current;
@@ -479,51 +626,20 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
     setIsMuted(!track.enabled);
   }, []);
 
-  const startScreenShare = useCallback(async () => {
-    try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
-      });
-      screenStreamRef.current = screenStream;
-      const videoTrack = screenStream.getVideoTracks()[0];
-      videoTrack.onended = () => stopScreenShareRef.current();
+  const setTouchInput = useCallback((x: number, y: number) => {
+    touchInputRef.current = { x, y };
+    walkTargetRef.current = null;
+  }, []);
 
-      remotesRef.current.forEach((remote) => {
-        if (remote.call?.peerConnection) {
-          const videoSender = remote.call.peerConnection
-            .getSenders()
-            .find((s) => s.track?.kind === "video");
-          if (videoSender) {
-            videoSender.replaceTrack(videoTrack);
-          } else {
-            remote.call.peerConnection.addTrack(videoTrack, screenStream);
-          }
-        } else if (peerRef.current) {
-          const combined = new MediaStream([
-            ...(localStreamRef.current?.getAudioTracks() ?? []),
-            videoTrack,
-          ]);
-          const call = peerRef.current.call(remote.info.id, combined);
-          if (call) setupMediaCall(call);
-        }
-      });
+  const clearTouchInput = useCallback(() => {
+    touchInputRef.current = { x: 0, y: 0 };
+  }, []);
 
-      setIsSharing(true);
-      if (myIdRef.current) {
-        broadcast({
-          type: "screen-share",
-          peerId: myIdRef.current,
-          isSharing: true,
-        });
-        updatePlayer(myIdRef.current, { isSharingScreen: true });
-      }
-    } catch {
-      setError(
-        "ไม่สามารถแชร์หน้าจอได้ — กรุณาอนุญาตการแชร์หน้าจอ / Screen share denied. Please allow screen sharing."
-      );
+  const setWalkTarget = useCallback((x: number, y: number) => {
+    if (canMoveTo(x, y)) {
+      walkTargetRef.current = { x, y };
     }
-  }, [broadcast, setupMediaCall, updatePlayer]);
+  }, []);
 
   const getShareUrl = useCallback(() => {
     const host = hostIdRef.current || myIdRef.current;
@@ -546,5 +662,8 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
     startScreenShare,
     stopScreenShare,
     getShareUrl,
+    setTouchInput,
+    clearTouchInput,
+    setWalkTarget,
   };
 }
