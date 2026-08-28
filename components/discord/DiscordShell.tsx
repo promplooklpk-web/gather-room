@@ -172,10 +172,7 @@ function VoiceRoomSession({
 export function DiscordShell({ userName, onLogout }: DiscordShellProps) {
   const [activeRoomId, setActiveRoomId] = useState(() => {
     const id = parseRoomFromUrl();
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      if (!params.get("room")) setRoomInUrl(id);
-    }
+    if (typeof window !== "undefined") setRoomInUrl(id);
     return id;
   });
 

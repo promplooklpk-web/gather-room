@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { t } from "@/lib/i18n";
+import { findRoom, parseRoomFromUrl } from "@/lib/rooms";
+import { isInAppBrowser } from "@/lib/peerConfig";
 
 interface JoinScreenProps {
   onJoin: (name: string) => void;
@@ -10,6 +12,8 @@ interface JoinScreenProps {
 export function JoinScreen({ onJoin }: JoinScreenProps) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const room = useMemo(() => findRoom(parseRoomFromUrl()), []);
+  const inApp = useMemo(() => isInAppBrowser(), []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,7 +36,22 @@ export function JoinScreen({ onJoin }: JoinScreenProps) {
           </div>
           <h1 className="text-2xl font-bold text-white">{t.appName}</h1>
           <p className="mt-1 text-sm text-[#949ba4]">{t.subtitle}</p>
+          {room && (
+            <p className="mt-3 text-sm text-[#dbdee1]">
+              {t.joiningRoom}:{" "}
+              <span className="font-semibold text-white">
+                {room.labelTh} / {room.label}
+              </span>
+            </p>
+          )}
+          <p className="mt-1 text-xs text-[#6d6f78]">{t.sameLinkHint}</p>
         </div>
+
+        {inApp && (
+          <div className="mb-4 rounded-md border border-[#faa61a]/40 bg-[#faa61a]/15 px-3 py-2 text-sm text-[#faa61a]">
+            {t.openInSafari}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

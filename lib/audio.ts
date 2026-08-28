@@ -10,7 +10,7 @@ export function setRemoteAudioDeafened(deafened: boolean) {
 }
 
 export async function getMicStream(): Promise<MediaStream> {
-  return navigator.mediaDevices.getUserMedia({
+  const request = navigator.mediaDevices.getUserMedia({
     audio: {
       echoCancellation: true,
       noiseSuppression: true,
@@ -20,6 +20,12 @@ export async function getMicStream(): Promise<MediaStream> {
     },
     video: false,
   });
+
+  const timeout = new Promise<never>((_, reject) => {
+    window.setTimeout(() => reject(new Error("mic-timeout")), 12000);
+  });
+
+  return Promise.race([request, timeout]);
 }
 
 export function createRemoteAudioElement(): HTMLAudioElement {

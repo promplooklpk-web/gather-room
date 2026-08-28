@@ -10,6 +10,7 @@ export interface PlayerState {
 export type SignalingMessage =
   | { type: "hello"; peer: PeerInfo }
   | { type: "welcome"; peers: PeerInfo[]; hostId: string }
+  | { type: "roster"; peers: PeerInfo[]; hostId: string }
   | { type: "peer-joined"; peer: PeerInfo }
   | { type: "peer-left"; peerId: string }
   | { type: "position"; peerId: string; x: number; y: number }

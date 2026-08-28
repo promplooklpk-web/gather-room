@@ -16,23 +16,36 @@ export const VOICE_ROOMS: VoiceRoom[] = [
 export const DEFAULT_ROOM_ID = VOICE_ROOMS[0].id;
 
 export function getRoomHostId(roomId: string): string {
-  return `gather-${roomId}-host`;
+  return `mtlclick-${roomId}-host`;
 }
 
 export function findRoom(roomId: string | null | undefined): VoiceRoom | undefined {
   if (!roomId) return undefined;
-  return VOICE_ROOMS.find((r) => r.id === roomId || r.slug === roomId);
+  const cleaned = roomId.replace(/^#/, "").trim();
+  return VOICE_ROOMS.find((r) => r.id === cleaned || r.slug === cleaned);
 }
 
 export function parseRoomFromUrl(): string {
   if (typeof window === "undefined") return DEFAULT_ROOM_ID;
-  const param = new URLSearchParams(window.location.search).get("room");
-  return findRoom(param)?.id ?? DEFAULT_ROOM_ID;
+  const params = new URLSearchParams(window.location.search);
+  const fromQuery = findRoom(params.get("room"));
+  if (fromQuery) return fromQuery.id;
+  const fromHash = findRoom(window.location.hash.replace(/^#/, ""));
+  return fromHash?.id ?? DEFAULT_ROOM_ID;
 }
 
 export function setRoomInUrl(roomId: string) {
   const url = new URL(window.location.href);
   url.searchParams.set("room", roomId);
   url.searchParams.delete("host");
+  url.hash = roomId;
   window.history.replaceState({}, "", url.toString());
+}
+
+export function getShareUrl(roomId: string): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set("room", roomId);
+  url.searchParams.delete("host");
+  url.hash = roomId;
+  return url.toString();
 }

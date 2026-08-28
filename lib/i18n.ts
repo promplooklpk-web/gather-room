@@ -43,4 +43,7 @@ export const t = {
   exitFullscreen: "ออกจากเต็มจอ",
   noOneHere: "ยังไม่มีใครในห้องนี้",
   waitingForPeople: "รอเพื่อนเข้าร่วมช่องเสียง",
+  openInSafari: "เปิดลิงก์นี้ใน Safari เพื่อคุยกับเครื่องอื่นได้",
+  joiningRoom: "กำลังเข้าห้อง",
+  sameLinkHint: "ใช้ลิงก์เดียวกันทุกเครื่องจะอยู่ในห้องเดียวกัน",
 };

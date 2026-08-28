@@ -22,7 +22,7 @@ export default function HomePage() {
   const handleLogout = () => {
     sessionStorage.removeItem(STORAGE_KEY);
     setName(null);
-    window.location.href = window.location.pathname;
+    window.location.reload();
   };
 
   if (!name) {
