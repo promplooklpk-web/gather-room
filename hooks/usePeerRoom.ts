@@ -13,11 +13,12 @@ import {
 } from "@/lib/audio";
 import {
   CONNECT_OPTIONS,
-  PEER_OPTIONS,
   SCREEN_CALL_META,
+  getPeerOptions,
   isMediaCallLive,
   isTransientPeerError,
   makeGuestPeerId,
+  watchRtcIce,
 } from "@/lib/peerConfig";
 import { pickColor } from "@/lib/colors";
 import { getRoomHostId, getShareUrl as buildShareUrl } from "@/lib/rooms";
@@ -26,6 +27,8 @@ import type { PeerInfo, PlayerState, SignalingMessage } from "@/lib/types";
 const HOST_CONNECT_MAX_ATTEMPTS = 24;
 const HOST_CONNECT_INTERVAL_MS = 1500;
 const HOST_TAKEOVER_AFTER = 8;
+const RELAY_FALLBACK_AFTER = 4;
+const RELAY_RECREATE_DELAY_MS = 600;
 
 function isConnInFlight(conn?: DataConnection, startedAt?: number) {
   if (!conn) return false;
@@ -39,6 +42,13 @@ function isConnInFlight(conn?: DataConnection, startedAt?: number) {
 function shouldOfferAudio(myId: string | null, remoteId: string) {
   if (!myId) return false;
   return myId < remoteId;
+}
+
+function isRtcHealthy(pc?: RTCPeerConnection) {
+  if (!pc) return false;
+  const ice = pc.iceConnectionState;
+  const conn = pc.connectionState;
+  return ice === "connected" || ice === "completed" || conn === "connected";
 }
 
 interface RemotePeer {
@@ -90,6 +100,10 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   const hostConnectTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopHostConnectRetryRef = useRef<() => void>(() => {});
   const tryTakeoverRef = useRef<() => void>(() => {});
+  const forceRelayRef = useRef(false);
+  const switchingRelayRef = useRef(false);
+  const switchToRelayRef = useRef<() => void>(() => {});
+  const onIceFailureRef = useRef<(kind: "data" | "media") => void>(() => {});
 
   useEffect(() => {
     nameRef.current = name;
@@ -184,6 +198,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       }
 
       remote.audioCall = call;
+      watchRtcIce(call.peerConnection as RTCPeerConnection | undefined, () => {
+        onIceFailureRef.current("media");
+      });
 
       call.on("stream", (remoteStream) => {
         const audioTracks = remoteStream.getAudioTracks();
@@ -251,6 +268,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         });
       });
 
+      watchRtcIce(call.peerConnection as RTCPeerConnection | undefined, () => {
+        onIceFailureRef.current("media");
+      });
       call.on("close", () => requestScreenAgain());
       call.on("error", () => requestScreenAgain());
     },
@@ -370,6 +390,14 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       remote.conn = conn;
       remote.connStartedAt = Date.now();
 
+      const watchConnIce = () => {
+        watchRtcIce(conn.peerConnection as RTCPeerConnection | undefined, () => {
+          onIceFailureRef.current("data");
+        });
+      };
+      watchConnIce();
+      conn.on("iceStateChanged", watchConnIce);
+
       const sendHello = () => {
         if (!conn.open || !myIdRef.current) return;
         try {
@@ -453,6 +481,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     if (!call) return;
 
     remote.screenCall = call;
+    watchRtcIce(call.peerConnection as RTCPeerConnection | undefined, () => {
+      onIceFailureRef.current("media");
+    });
     call.on("close", () => {
       if (remote.screenCall === call) remote.screenCall = undefined;
     });
@@ -563,6 +594,16 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     connectToPeerRef.current = connectToPeer;
     stopScreenShareRef.current = stopScreenShare;
     startScreenCallToPeerRef.current = startScreenCallToPeer;
+    onIceFailureRef.current = (kind) => {
+      if (forceRelayRef.current || switchingRelayRef.current) return;
+      if (kind === "data") {
+        for (const remote of remotesRef.current.values()) {
+          const pc = remote.conn?.peerConnection as RTCPeerConnection | undefined;
+          if (remote.conn?.open && isRtcHealthy(pc)) return;
+        }
+      }
+      switchToRelayRef.current();
+    };
   });
 
   const startHostConnectRetry = useCallback(() => {
@@ -591,6 +632,10 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       }
 
       attempts += 1;
+      if (attempts === RELAY_FALLBACK_AFTER && !forceRelayRef.current) {
+        switchToRelayRef.current();
+        return;
+      }
       if (attempts === HOST_TAKEOVER_AFTER) {
         tryTakeoverRef.current();
         return;
@@ -625,8 +670,25 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     const remotes = remotesRef.current;
     roomHostIdRef.current = getRoomHostId(roomId);
     const roomHostId = roomHostIdRef.current;
+    forceRelayRef.current = false;
+    switchingRelayRef.current = false;
 
     let session = 0;
+    let relayTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function peerOptions() {
+      return getPeerOptions(forceRelayRef.current);
+    }
+
+    function dropAllRemotes() {
+      remotesRef.current.forEach((remote) => {
+        remote.conn?.close();
+        remote.audioCall?.close();
+        remote.screenCall?.close();
+        remote.audioEl?.remove();
+      });
+      remotesRef.current.clear();
+    }
 
     function attachPeerHandlers(peer: Peer) {
       peer.on("connection", (conn) => setupDataConnectionRef.current(conn));
@@ -687,7 +749,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       const mySession = ++session;
 
       const guestId = makeGuestPeerId(roomId);
-      const peer = new Peer(guestId, PEER_OPTIONS);
+      const peer = new Peer(guestId, peerOptions());
       peerRef.current = peer;
       attachPeerHandlers(peer);
 
@@ -709,11 +771,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       });
     }
 
-    function openHostPeer(): void {
+    function openHostPeer(reclaimTries = 0): void {
       if (destroyed) return;
       const mySession = ++session;
 
-      const hostPeer = new Peer(roomHostId, PEER_OPTIONS);
+      const hostPeer = new Peer(roomHostId, peerOptions());
       peerRef.current = hostPeer;
       attachPeerHandlers(hostPeer);
 
@@ -726,6 +788,12 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         console.error("Host peer error:", err);
         if (err.type === "unavailable-id" && mySession === session) {
           hostPeer.destroy();
+          if (forceRelayRef.current && reclaimTries < 4) {
+            window.setTimeout(() => {
+              if (!destroyed) openHostPeer(reclaimTries + 1);
+            }, RELAY_RECREATE_DELAY_MS);
+            return;
+          }
           openGuestPeer();
           return;
         }
@@ -737,18 +805,37 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
     function tryTakeoverHost() {
       if (destroyed || isHostRef.current) return;
-      remotesRef.current.forEach((remote) => {
-        remote.conn?.close();
-        remote.audioCall?.close();
-        remote.screenCall?.close();
-        remote.audioEl?.remove();
-      });
-      remotesRef.current.clear();
+      dropAllRemotes();
       peerRef.current?.destroy();
       openHostPeer();
     }
 
+    function switchToRelayAndRejoin() {
+      if (destroyed || forceRelayRef.current || switchingRelayRef.current) return;
+      forceRelayRef.current = true;
+      switchingRelayRef.current = true;
+      stopHostConnectRetry();
+
+      const wasHost = isHostRef.current;
+      dropAllRemotes();
+      try {
+        peerRef.current?.destroy();
+      } catch {
+        /* already gone */
+      }
+      peerRef.current = null;
+
+      if (relayTimer) clearTimeout(relayTimer);
+      relayTimer = setTimeout(() => {
+        switchingRelayRef.current = false;
+        if (destroyed) return;
+        if (wasHost) openHostPeer();
+        else openGuestPeer();
+      }, RELAY_RECREATE_DELAY_MS);
+    }
+
     tryTakeoverRef.current = tryTakeoverHost;
+    switchToRelayRef.current = switchToRelayAndRejoin;
 
     function startMic() {
       void getMicStream()
@@ -782,6 +869,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
     return () => {
       destroyed = true;
+      switchingRelayRef.current = false;
+      if (relayTimer) clearTimeout(relayTimer);
       stopHostConnectRetry();
       remotes.forEach((remote) => {
         remote.conn?.close();
