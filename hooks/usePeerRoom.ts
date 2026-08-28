@@ -26,9 +26,9 @@ import type { PeerInfo, PlayerState, SignalingMessage } from "@/lib/types";
 
 const HOST_CONNECT_MAX_ATTEMPTS = 24;
 const HOST_CONNECT_INTERVAL_MS = 1500;
-const HOST_TAKEOVER_AFTER = 8;
-const RELAY_FALLBACK_AFTER = 4;
-const RELAY_RECREATE_DELAY_MS = 600;
+const HOST_TAKEOVER_AFTER = 14;
+const RELAY_FALLBACK_AFTER = 10;
+const RELAY_RECREATE_DELAY_MS = 1000;
 
 function isConnInFlight(conn?: DataConnection, startedAt?: number) {
   if (!conn) return false;
@@ -602,6 +602,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           if (remote.conn?.open && isRtcHealthy(pc)) return;
         }
       }
+      // Recreating the host peer drops the room id; guests should be the
+      // ones that switch to TURN-only when UDP is blocked.
+      if (isHostRef.current && kind === "media") return;
       switchToRelayRef.current();
     };
   });
@@ -727,6 +730,15 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     function onPeerReady(id: string, asHost: boolean) {
       if (destroyed) return;
 
+      const prevId = myIdRef.current;
+      if (prevId && prevId !== id) {
+        setPlayers((prev) => {
+          const next = { ...prev };
+          delete next[prevId];
+          return next;
+        });
+      }
+
       myIdRef.current = id;
       setMyId(id);
       isHostRef.current = asHost;
@@ -771,7 +783,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       });
     }
 
-    function openHostPeer(reclaimTries = 0): void {
+    function openHostPeer(): void {
       if (destroyed) return;
       const mySession = ++session;
 
@@ -788,12 +800,6 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         console.error("Host peer error:", err);
         if (err.type === "unavailable-id" && mySession === session) {
           hostPeer.destroy();
-          if (forceRelayRef.current && reclaimTries < 4) {
-            window.setTimeout(() => {
-              if (!destroyed) openHostPeer(reclaimTries + 1);
-            }, RELAY_RECREATE_DELAY_MS);
-            return;
-          }
           openGuestPeer();
           return;
         }
@@ -812,12 +818,16 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
     function switchToRelayAndRejoin() {
       if (destroyed || forceRelayRef.current || switchingRelayRef.current) return;
+      if (isHostRef.current) return;
       forceRelayRef.current = true;
       switchingRelayRef.current = true;
       stopHostConnectRetry();
-
-      const wasHost = isHostRef.current;
       dropAllRemotes();
+      setPlayers((prev) => {
+        const mine = myIdRef.current;
+        if (!mine || !prev[mine]) return {};
+        return { [mine]: prev[mine] };
+      });
       try {
         peerRef.current?.destroy();
       } catch {
@@ -829,8 +839,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       relayTimer = setTimeout(() => {
         switchingRelayRef.current = false;
         if (destroyed) return;
-        if (wasHost) openHostPeer();
-        else openGuestPeer();
+        openGuestPeer();
       }, RELAY_RECREATE_DELAY_MS);
     }
 

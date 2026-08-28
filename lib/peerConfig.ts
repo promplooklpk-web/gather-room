@@ -28,18 +28,6 @@ export function iceServers(): RTCIceServer[] {
       username: "peerjs",
       credential: "peerjsp",
     },
-    // Open Relay: ports 80/443 survive most VPN / firewall policies.
-    {
-      urls: [
-        "turn:openrelay.metered.ca:80",
-        "turn:openrelay.metered.ca:80?transport=tcp",
-        "turn:openrelay.metered.ca:443",
-        "turn:openrelay.metered.ca:443?transport=tcp",
-        "turns:openrelay.metered.ca:443?transport=tcp",
-      ],
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
   ];
 }
 
@@ -51,7 +39,6 @@ export function getPeerOptions(forceRelay = false): PeerJSOption {
     secure: true,
     config: {
       iceServers: iceServers(),
-      iceCandidatePoolSize: 8,
       iceTransportPolicy: forceRelay ? "relay" : "all",
     },
   };
@@ -126,23 +113,15 @@ export function watchRtcIce(
           /* older WebKit */
         }
       }
-      scheduleGiveUp(2500);
+      scheduleGiveUp(4000);
     } else if (ice === "disconnected" || conn === "disconnected") {
-      if (!restarted) {
-        restarted = true;
-        try {
-          pc.restartIce();
-        } catch {
-          /* older WebKit */
-        }
-      }
-      scheduleGiveUp(5000);
+      // Brief disconnects are normal during candidate switching — wait longer.
+      scheduleGiveUp(12000);
     }
   };
 
   pc.addEventListener("iceconnectionstatechange", onChange);
   pc.addEventListener("connectionstatechange", onChange);
-  onChange();
 }
 
 export function isMediaCallLive(call?: MediaConnection | null): boolean {
