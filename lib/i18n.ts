@@ -12,10 +12,14 @@ export const t = {
   copied: "คัดลอกแล้ว!",
   participants: "ผู้เข้าร่วม / People",
   you: "(คุณ)",
-  controls: "WASD หรือลูกศร = เดิน",
+  controls: "WASD / ลูกศร / จอยสติก / แตะแผนที่ = เดิน",
   connecting: "กำลังเชื่อมต่อ...",
   screenShareTitle: "หน้าจอที่แชร์ / Shared screen",
   screenOnWall: "จอบนผนัง",
+  sharingActive: "กำลังแชร์หน้าจอของคุณ / You are sharing your screen",
+  waitingForShare: "รอหน้าจอจากเพื่อน... / Waiting for shared screen...",
+  tapToPlayVideo: "แตะเพื่อดูวิดีโอ / Tap to play video",
+  tapToWalk: "แตะพื้นเพื่อเดิน / Tap floor to walk",
   micDenied:
     "ไม่สามารถใช้ไมค์ได้ — กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์ / Microphone access denied. Please allow mic permission.",
   screenDenied:
