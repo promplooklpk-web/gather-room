@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { JoinScreen } from "@/components/JoinScreen";
-import { RoomView } from "@/components/RoomView";
+import { DiscordShell } from "@/components/discord/DiscordShell";
 
 const STORAGE_KEY = "gather-room-name";
 
@@ -19,7 +19,7 @@ export default function HomePage() {
     setName(playerName);
   };
 
-  const handleLeave = () => {
+  const handleLogout = () => {
     sessionStorage.removeItem(STORAGE_KEY);
     setName(null);
     window.location.href = window.location.pathname;
@@ -29,5 +29,5 @@ export default function HomePage() {
     return <JoinScreen onJoin={handleJoin} />;
   }
 
-  return <RoomView name={name} onLeave={handleLeave} />;
+  return <DiscordShell userName={name} onLogout={handleLogout} />;
 }

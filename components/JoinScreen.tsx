@@ -22,12 +22,16 @@ export function JoinScreen({ onJoin }: JoinScreenProps) {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-emerald-900 via-teal-900 to-slate-900 p-4">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 shadow-2xl backdrop-blur-md">
+    <div className="flex min-h-screen items-center justify-center bg-[#1e1f22] p-4">
+      <div className="w-full max-w-md rounded-lg border border-[#1f2023] bg-[#2b2d31] p-8 shadow-2xl">
         <div className="mb-6 text-center">
-          <div className="mb-2 text-4xl">🏢</div>
-          <h1 className="text-2xl font-bold text-white">{t.title}</h1>
-          <p className="mt-1 text-sm text-emerald-200/70">{t.subtitle}</p>
+          <div className="mb-3 flex justify-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#5865f2] text-2xl font-bold text-white">
+              M
+            </div>
+          </div>
+          <h1 className="text-2xl font-bold text-white">{t.appName}</h1>
+          <p className="mt-1 text-sm text-[#949ba4]">{t.subtitle}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -41,24 +45,18 @@ export function JoinScreen({ onJoin }: JoinScreenProps) {
               }}
               placeholder={t.namePlaceholder}
               maxLength={20}
-              className="w-full rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-white placeholder:text-white/40 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/30"
+              className="w-full rounded-md border border-[#1f2023] bg-[#1e1f22] px-4 py-3 text-white placeholder:text-[#6d6f78] focus:border-[#5865f2] focus:outline-none focus:ring-1 focus:ring-[#5865f2]"
               autoFocus
             />
-            {error && (
-              <p className="mt-2 text-sm text-red-300">{error}</p>
-            )}
+            {error && <p className="mt-2 text-sm text-[#ed4245]">{error}</p>}
           </div>
           <button
             type="submit"
-            className="w-full rounded-xl bg-emerald-500 py-3 font-semibold text-white transition hover:bg-emerald-400 active:scale-[0.98]"
+            className="w-full rounded-md bg-[#5865f2] py-3 font-semibold text-white transition hover:bg-[#4752c4]"
           >
             {t.enterRoom}
           </button>
         </form>
-
-        <p className="mt-6 text-center text-xs text-white/40">
-          {t.controls}
-        </p>
       </div>
     </div>
   );
