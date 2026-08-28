@@ -3,15 +3,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Peer, { DataConnection, MediaConnection } from "peerjs";
 import {
+  createRemoteAudioElement,
+  getMicStream,
+  getMicTrack,
+  playRemoteAudio,
+  removeRemoteAudioElement,
+  unlockAllRemoteAudio,
+} from "@/lib/audio";
+import {
   PEER_OPTIONS,
-  ROOM_HOST_ID,
   SCREEN_CALL_META,
   isTransientPeerError,
   makeGuestPeerId,
 } from "@/lib/peerConfig";
 import { MOVE_SPEED, SPAWN, canMoveTo, pickColor } from "@/lib/room";
+import { getRoomHostId } from "@/lib/rooms";
 import type { PeerInfo, PlayerState, SignalingMessage } from "@/lib/types";
-import { ROOM_ID } from "@/lib/types";
 
 const HOST_CONNECT_MAX_ATTEMPTS = 20;
 const HOST_CONNECT_INTERVAL_MS = 1500;
@@ -26,10 +33,12 @@ interface RemotePeer {
 
 interface UsePeerRoomOptions {
   name: string;
+  roomId: string;
   enabled: boolean;
 }
 
-export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
+export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
+  const roomHostIdRef = useRef(getRoomHostId(roomId));
   const [myId, setMyId] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(false);
   const [players, setPlayers] = useState<Record<string, PlayerState>>({});
@@ -130,8 +139,7 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
     });
     const remote = remotesRef.current.get(peerId);
     if (remote?.audioEl) {
-      remote.audioEl.srcObject = null;
-      remote.audioEl.remove();
+      removeRemoteAudioElement(remote.audioEl);
     }
     remote?.audioCall?.close();
     remote?.screenCall?.close();
@@ -163,13 +171,10 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
         if (audioTracks.length === 0) return;
 
         if (!remote!.audioEl) {
-          const audio = document.createElement("audio");
-          audio.autoplay = true;
-          document.body.appendChild(audio);
-          remote!.audioEl = audio;
+          remote!.audioEl = createRemoteAudioElement();
         }
         remote!.audioEl!.srcObject = new MediaStream(audioTracks);
-        void remote!.audioEl!.play().catch(() => {});
+        void playRemoteAudio(remote!.audioEl!);
       });
 
       call.on("close", () => {
@@ -291,7 +296,7 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
       remote.conn = conn;
 
       conn.on("open", () => {
-        if (conn.peer === ROOM_HOST_ID) {
+        if (conn.peer === roomHostIdRef.current) {
           stopHostConnectRetryRef.current();
           setError((prev) =>
             prev?.startsWith("เชื่อมต่อไม่สำเร็จ") ? null : prev
@@ -454,7 +459,7 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
         return;
       }
 
-      const hostConn = remotesRef.current.get(ROOM_HOST_ID);
+      const hostConn = remotesRef.current.get(roomHostIdRef.current);
       if (hostConn?.conn?.open) {
         if (hostConnectTimerRef.current) {
           clearInterval(hostConnectTimerRef.current);
@@ -467,7 +472,7 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
       }
 
       attempts += 1;
-      connectToPeerRef.current(ROOM_HOST_ID);
+      connectToPeerRef.current(roomHostIdRef.current);
 
       if (attempts >= HOST_CONNECT_MAX_ATTEMPTS) {
         if (hostConnectTimerRef.current) {
@@ -495,13 +500,16 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
 
     let destroyed = false;
     const remotes = remotesRef.current;
+    roomHostIdRef.current = getRoomHostId(roomId);
+    const roomHostId = roomHostIdRef.current;
 
     function attachPeerHandlers(peer: Peer) {
       peer.on("connection", (conn) => setupDataConnectionRef.current(conn));
 
       peer.on("call", (call) => {
         const meta = call.metadata as { type?: string } | undefined;
-        const answerStream = localStreamRef.current ?? new MediaStream();
+        const answerStream =
+          getMicTrack(localStreamRef.current) ?? new MediaStream();
 
         if (meta?.type === "screen") {
           call.answer(answerStream);
@@ -527,13 +535,13 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
       setMyId(id);
       isHostRef.current = asHost;
       setIsHost(asHost);
-      hostIdRef.current = ROOM_HOST_ID;
+      hostIdRef.current = roomHostIdRef.current;
 
       announceJoin(id);
       setConnected(true);
 
       if (!asHost) {
-        connectToPeerRef.current(ROOM_HOST_ID);
+        connectToPeerRef.current(roomHostIdRef.current);
         startHostConnectRetry();
       }
     }
@@ -541,7 +549,7 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
     function openGuestPeer(): void {
       if (destroyed) return;
 
-      const guestId = makeGuestPeerId(ROOM_ID);
+      const guestId = makeGuestPeerId(roomId);
       const peer = new Peer(guestId, PEER_OPTIONS);
       peerRef.current = peer;
       attachPeerHandlers(peer);
@@ -569,17 +577,14 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
       }
 
       try {
-        localStreamRef.current = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: false,
-        });
+        localStreamRef.current = await getMicStream();
       } catch {
         setError(
           "ไม่สามารถใช้ไมค์ได้ — กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์ / Microphone access denied. Please allow mic permission."
         );
       }
 
-      const hostPeer = new Peer(ROOM_HOST_ID, PEER_OPTIONS);
+      const hostPeer = new Peer(roomHostId, PEER_OPTIONS);
       peerRef.current = hostPeer;
       attachPeerHandlers(hostPeer);
 
@@ -619,6 +624,7 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
   }, [
     enabled,
     name,
+    roomId,
     announceJoin,
     setupAudioCall,
     setupScreenReceiveCall,
@@ -732,6 +738,11 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
     if (!track) return;
     track.enabled = !track.enabled;
     setIsMuted(!track.enabled);
+    void unlockAllRemoteAudio();
+  }, []);
+
+  const unlockAudio = useCallback(() => {
+    void unlockAllRemoteAudio();
   }, []);
 
   const setTouchInput = useCallback((x: number, y: number) => {
@@ -751,9 +762,10 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
 
   const getShareUrl = useCallback(() => {
     const url = new URL(window.location.href);
+    url.searchParams.set("room", roomId);
     url.searchParams.delete("host");
     return url.toString();
-  }, []);
+  }, [roomId]);
 
   return {
     myId,
@@ -772,5 +784,7 @@ export function usePeerRoom({ name, enabled }: UsePeerRoomOptions) {
     setTouchInput,
     clearTouchInput,
     setWalkTarget,
+    unlockAudio,
+    roomId,
   };
 }

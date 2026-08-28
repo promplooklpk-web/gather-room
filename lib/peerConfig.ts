@@ -1,5 +1,4 @@
 import type { PeerError } from "peerjs";
-import { ROOM_HOST_ID, ROOM_ID } from "@/lib/types";
 
 export const PEER_OPTIONS = {
   host: "0.peerjs.com",
@@ -15,8 +14,6 @@ export const PEER_OPTIONS = {
 };
 
 export const SCREEN_CALL_META = { type: "screen" as const };
-
-export { ROOM_HOST_ID };
 
 /** Errors that are expected during normal join / flaky mobile networks. */
 export function isTransientPeerError(err: PeerError<string>): boolean {
