@@ -1,0 +1,25 @@
+export const t = {
+  title: "ห้องรวมพล",
+  subtitle: "Tiny Gather-style room",
+  namePlaceholder: "ชื่อของคุณ / Your name",
+  enterRoom: "เข้าห้อง / Enter room",
+  nameRequired: "กรุณาใส่ชื่อ / Please enter your name",
+  mute: "ปิดเสียง / Mute",
+  unmute: "เปิดเสียง / Unmute",
+  shareScreen: "แชร์หน้าจอ / Share screen",
+  stopShare: "หยุดแชร์ / Stop sharing",
+  copyLink: "คัดลอกลิงก์ / Copy link",
+  copied: "คัดลอกแล้ว!",
+  participants: "ผู้เข้าร่วม / People",
+  you: "(คุณ)",
+  controls: "WASD หรือลูกศร = เดิน",
+  connecting: "กำลังเชื่อมต่อ...",
+  screenShareTitle: "หน้าจอที่แชร์ / Shared screen",
+  screenOnWall: "จอบนผนัง",
+  micDenied:
+    "ไม่สามารถใช้ไมค์ได้ — กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์ / Microphone access denied. Please allow mic permission.",
+  screenDenied:
+    "ไม่สามารถแชร์หน้าจอได้ — กรุณาอนุญาตการแชร์หน้าจอ / Screen share denied. Please allow screen sharing.",
+  connectionError: "เชื่อมต่อไม่สำเร็จ / Connection failed. ลองรีเฟรชหน้า",
+  leaveRoom: "ออกจากห้อง",
+};
