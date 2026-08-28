@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ห้องรวมพล | Gather Room",
-  description: "Tiny Gather-style web room with voice and screen share",
+  title: "MTL Click | Voice Rooms",
+  description: "Discord-style voice rooms with full-screen share",
 };
 
 export const viewport: Viewport = {

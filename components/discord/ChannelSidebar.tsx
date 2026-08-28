@@ -3,6 +3,8 @@
 import type { PlayerState } from "@/lib/types";
 import { t } from "@/lib/i18n";
 import type { VoiceRoom } from "@/lib/rooms";
+import { UserPanel } from "@/components/discord/UserPanel";
+import { initialFromName } from "@/lib/colors";
 
 interface ChannelSidebarProps {
   rooms: VoiceRoom[];
@@ -12,13 +14,17 @@ interface ChannelSidebarProps {
   myId: string | null;
   connected: boolean;
   isMuted: boolean;
+  isDeafened: boolean;
   isSharing: boolean;
   userName: string;
+  userColor: string;
   onSelectRoom: (roomId: string) => void;
   onToggleMute: () => void;
+  onToggleDeafen: () => void;
   onStartShare: () => void;
   onStopShare: () => void;
   onDisconnect: () => void;
+  onCopyLink: () => Promise<void> | void;
 }
 
 export function ChannelSidebar({
@@ -29,13 +35,17 @@ export function ChannelSidebar({
   myId,
   connected,
   isMuted,
+  isDeafened,
   isSharing,
   userName,
+  userColor,
   onSelectRoom,
   onToggleMute,
+  onToggleDeafen,
   onStartShare,
   onStopShare,
   onDisconnect,
+  onCopyLink,
 }: ChannelSidebarProps) {
   return (
     <aside className="flex w-60 shrink-0 flex-col bg-[#2b2d31] text-[#dbdee1]">
@@ -50,7 +60,6 @@ export function ChannelSidebar({
         <ul className="space-y-0.5">
           {rooms.map((room) => {
             const active = room.id === activeRoomId;
-            const count = active ? players.length : null;
             return (
               <li key={room.id}>
                 <button
@@ -62,99 +71,58 @@ export function ChannelSidebar({
                       : "text-[#b5bac1] hover:bg-[#35373c] hover:text-[#dbdee1]"
                   }`}
                 >
-                  <span className="text-[#949ba4]">🔊</span>
+                  <span className="text-[#80848e]">🔊</span>
                   <span className="flex-1 truncate">
                     {room.labelTh} / {room.label}
                   </span>
-                  {active && count !== null && (
-                    <span className="text-[11px] text-[#23a559]">{count}</span>
-                  )}
                 </button>
+                {active && (
+                  <ul className="ml-6 mt-0.5 space-y-0.5">
+                    {players.map((p) => (
+                      <li
+                        key={p.id}
+                        className="flex items-center gap-2 rounded px-1 py-0.5 text-sm text-[#dbdee1]"
+                      >
+                        <span
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                          style={{ backgroundColor: p.color }}
+                        >
+                          {initialFromName(p.name)}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">
+                          {p.name}
+                          {p.id === myId ? ` ${t.you}` : ""}
+                        </span>
+                        {p.isSharingScreen && (
+                          <span className="rounded bg-[#ed4245] px-1 py-px text-[9px] font-bold tracking-wide text-white">
+                            {t.live}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </li>
             );
           })}
         </ul>
-
-        {connected && (
-          <div className="mt-4 px-2">
-            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[#949ba4]">
-              {t.participants}
-            </p>
-            <ul className="space-y-1">
-              {players.map((p) => (
-                <li
-                  key={p.id}
-                  className="flex items-center gap-2 rounded px-2 py-1 text-sm text-[#dbdee1]"
-                >
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: p.color }}
-                  />
-                  <span className="truncate">
-                    {p.name}
-                    {p.id === myId && (
-                      <span className="text-[#23a559]"> {t.you}</span>
-                    )}
-                  </span>
-                  {p.isSharingScreen && <span className="text-xs">🖥️</span>}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </div>
 
-      <div className="border-t border-[#1f2023] bg-[#232428] p-2">
-        {connected && (
-          <div className="mb-2 rounded bg-[#2b2d31] px-2 py-1.5">
-            <p className="flex items-center gap-1.5 text-xs text-[#23a559]">
-              <span className="h-2 w-2 rounded-full bg-[#23a559]" />
-              {t.connectedTo}: {activeRoomLabel}
-            </p>
-          </div>
-        )}
-        <div className="mb-2 flex gap-1">
-          <button
-            type="button"
-            onClick={onToggleMute}
-            className={`flex-1 rounded px-2 py-1.5 text-xs font-medium ${
-              isMuted
-                ? "bg-[#ed4245] text-white"
-                : "bg-[#383a40] text-[#dbdee1] hover:bg-[#404249]"
-            }`}
-          >
-            {isMuted ? t.unmute : t.mute}
-          </button>
-          <button
-            type="button"
-            onClick={isSharing ? onStopShare : onStartShare}
-            className={`flex-1 rounded px-2 py-1.5 text-xs font-medium ${
-              isSharing
-                ? "bg-[#faa61a] text-white"
-                : "bg-[#383a40] text-[#dbdee1] hover:bg-[#404249]"
-            }`}
-          >
-            {isSharing ? t.stopShare : t.shareScreen}
-          </button>
-        </div>
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-white">{userName}</p>
-            <p className="truncate text-xs text-[#949ba4]">
-              {connected ? t.inRoom : t.connecting}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onDisconnect}
-            className="rounded bg-[#383a40] p-2 text-[#ed4245] hover:bg-[#404249]"
-            title={t.disconnect}
-            aria-label={t.disconnect}
-          >
-            📞
-          </button>
-        </div>
-      </div>
+      <UserPanel
+        userName={userName}
+        userColor={userColor}
+        connected={connected}
+        isMuted={isMuted}
+        isDeafened={isDeafened}
+        isSharing={isSharing}
+        roomLabel={activeRoomLabel}
+        onToggleMute={onToggleMute}
+        onToggleDeafen={onToggleDeafen}
+        onStartShare={onStartShare}
+        onStopShare={onStopShare}
+        onDisconnect={onDisconnect}
+        onCopyLink={onCopyLink}
+      />
     </aside>
   );
 }

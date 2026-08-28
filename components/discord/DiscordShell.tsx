@@ -2,16 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { usePeerRoom } from "@/hooks/usePeerRoom";
-import { GameCanvas } from "@/components/GameCanvas";
-import { TouchJoystick } from "@/components/TouchJoystick";
 import { ServerRail } from "@/components/discord/ServerRail";
 import { ChannelSidebar } from "@/components/discord/ChannelSidebar";
 import { FloatingControlBar } from "@/components/discord/FloatingControlBar";
-import {
-  ParticipantTiles,
-  ScreenStage,
-} from "@/components/discord/VoiceStage";
+import { ScreenStage } from "@/components/discord/VoiceStage";
 import { t } from "@/lib/i18n";
+import { setRemoteAudioDeafened } from "@/lib/audio";
 import {
   VOICE_ROOMS,
   findRoom,
@@ -43,70 +39,92 @@ function VoiceRoomSession({
   const room = findRoom(roomId)!;
   const {
     myId,
+    myPlayer,
     players,
     connected,
     error,
     isMuted,
     isSharing,
     remoteScreen,
+    localScreen,
     toggleMute,
     startScreenShare,
     stopScreenShare,
-    setTouchInput,
-    clearTouchInput,
-    setWalkTarget,
+    getShareUrl,
     unlockAudio,
   } = usePeerRoom({ name: userName, roomId, enabled: true });
 
   const [needsAudioUnlock, setNeedsAudioUnlock] = useState(
     () => typeof window !== "undefined" && "ontouchstart" in window
   );
+  const [isDeafened, setIsDeafened] = useState(false);
 
   const handleUnlockAudio = () => {
     unlockAudio();
     setNeedsAudioUnlock(false);
   };
 
+  const handleToggleDeafen = () => {
+    setIsDeafened((prev) => {
+      const next = !prev;
+      setRemoteAudioDeafened(next);
+      if (!next) handleUnlockAudio();
+      return next;
+    });
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(getShareUrl());
+    } catch {
+      window.prompt(t.copyLink, getShareUrl());
+    }
+  };
+
   useEffect(() => {
     const prevOverflow = document.body.style.overflow;
-    const prevTouch = document.body.style.touchAction;
     document.body.style.overflow = "hidden";
-    document.body.style.touchAction = "none";
     return () => {
       document.body.style.overflow = prevOverflow;
-      document.body.style.touchAction = prevTouch;
+      setRemoteAudioDeafened(false);
     };
   }, []);
 
   const someoneSharing = players.some((p) => p.isSharingScreen);
+  const roomLabel = `${room.labelTh} / ${room.label}`;
+  const userColor = myPlayer?.color ?? "#5865f2";
 
   return (
     <>
       <ChannelSidebar
         rooms={rooms}
         activeRoomId={roomId}
-        activeRoomLabel={`${room.labelTh} / ${room.label}`}
+        activeRoomLabel={roomLabel}
         players={players}
         myId={myId}
         connected={connected}
         isMuted={isMuted}
+        isDeafened={isDeafened}
         isSharing={isSharing}
         userName={userName}
+        userColor={userColor}
         onSelectRoom={onSelectRoom}
         onToggleMute={() => {
           toggleMute();
           handleUnlockAudio();
         }}
+        onToggleDeafen={handleToggleDeafen}
         onStartShare={startScreenShare}
         onStopShare={stopScreenShare}
         onDisconnect={onLogout}
+        onCopyLink={handleCopyLink}
       />
 
       <main className="relative flex min-w-0 flex-1 flex-col bg-[#313338]">
         <header className="flex h-12 shrink-0 items-center border-b border-[#1f2023] px-4 shadow-sm">
           <span className="text-[#949ba4]">🔊</span>
           <h2 className="ml-2 text-[15px] font-semibold text-white">
-            {room.labelTh} / {room.label}
+            {roomLabel}
           </h2>
           {connected && (
             <span className="ml-3 rounded bg-[#23a559]/20 px-2 py-0.5 text-[11px] font-semibold text-[#23a559]">
@@ -115,42 +133,26 @@ function VoiceRoomSession({
           )}
         </header>
 
-        <ScreenStage
-          remoteScreen={remoteScreen}
-          isSharing={isSharing}
-          someoneSharing={someoneSharing}
-        />
-
         {error && (
           <div className="mx-4 mt-3 rounded border border-[#ed4245]/40 bg-[#ed4245]/15 px-3 py-2 text-sm text-[#faa61a]">
             {error}
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <ParticipantTiles players={players} myId={myId} />
-
-          <div className="flex flex-1 flex-col items-center justify-center p-4">
-            <div className="relative w-full max-w-[768px]">
-              <GameCanvas
-                players={players}
-                myId={myId}
-                remoteScreen={remoteScreen?.stream ?? null}
-                onTapWalk={setWalkTarget}
-              />
-              <div className="pointer-events-auto absolute bottom-3 left-3 z-10">
-                <TouchJoystick onMove={setTouchInput} onEnd={clearTouchInput} />
-              </div>
-            </div>
-            <p className="mt-2 text-center text-xs text-[#949ba4]">
-              {t.controls}
-              <span className="block text-[#6d6f78]">{t.tapToWalk}</span>
-            </p>
-          </div>
-        </div>
+        <ScreenStage
+          players={players}
+          myId={myId}
+          roomLabel={roomLabel}
+          remoteScreen={remoteScreen}
+          localScreen={localScreen}
+          isSharing={isSharing}
+          isMuted={isMuted}
+          isDeafened={isDeafened}
+          someoneSharing={someoneSharing}
+        />
 
         <FloatingControlBar
-          isMuted={isMuted}
+          isMuted={isMuted || isDeafened}
           isSharing={isSharing}
           onToggleMute={() => {
             toggleMute();

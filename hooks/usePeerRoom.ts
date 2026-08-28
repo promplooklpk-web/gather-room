@@ -16,7 +16,7 @@ import {
   isTransientPeerError,
   makeGuestPeerId,
 } from "@/lib/peerConfig";
-import { MOVE_SPEED, SPAWN, canMoveTo, pickColor } from "@/lib/room";
+import { pickColor } from "@/lib/colors";
 import { getRoomHostId } from "@/lib/rooms";
 import type { PeerInfo, PlayerState, SignalingMessage } from "@/lib/types";
 
@@ -51,24 +51,20 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     name: string;
     stream: MediaStream;
   } | null>(null);
+  const [localScreen, setLocalScreen] = useState<MediaStream | null>(null);
 
   const peerRef = useRef<Peer | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const remotesRef = useRef<Map<string, RemotePeer>>(new Map());
   const myColorRef = useRef("");
-  const positionRef = useRef({ x: SPAWN.x, y: SPAWN.y });
-  const keysRef = useRef<Set<string>>(new Set());
-  const touchInputRef = useRef({ x: 0, y: 0 });
-  const walkTargetRef = useRef<{ x: number; y: number } | null>(null);
+  const positionRef = useRef({ x: 0, y: 0 });
   const hostIdRef = useRef<string | null>(null);
   const isHostRef = useRef(false);
   const myIdRef = useRef<string | null>(null);
   const nameRef = useRef(name);
-  const animationRef = useRef<number>(0);
   const connectToPeerRef = useRef<(remoteId: string) => void>(() => {});
   const stopScreenShareRef = useRef<() => void>(() => {});
-  const startScreenCallsRef = useRef<() => void>(() => {});
   const hostConnectTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopHostConnectRetryRef = useRef<() => void>(() => {});
 
@@ -84,16 +80,6 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       if (remote.conn?.open) remote.conn.send(msg);
     });
   }, []);
-
-  const sendPosition = useCallback(() => {
-    if (!myIdRef.current) return;
-    broadcast({
-      type: "position",
-      peerId: myIdRef.current,
-      x: positionRef.current.x,
-      y: positionRef.current.y,
-    });
-  }, [broadcast]);
 
   const updatePlayer = useCallback((peerId: string, patch: Partial<PlayerState>) => {
     setPlayers((prev) => {
@@ -158,8 +144,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
             id: remoteId,
             name: "???",
             color: pickColor(remoteId.length),
-            x: SPAWN.x,
-            y: SPAWN.y,
+            x: 0,
+            y: 0,
           },
         };
         remotesRef.current.set(remoteId, remote);
@@ -194,8 +180,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
             id: remoteId,
             name: "???",
             color: pickColor(remoteId.length),
-            x: SPAWN.x,
-            y: SPAWN.y,
+            x: 0,
+            y: 0,
           },
         };
         remotesRef.current.set(remoteId, remote);
@@ -287,8 +273,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
             id: remoteId,
             name: "???",
             color: pickColor(remoteId.length),
-            x: SPAWN.x,
-            y: SPAWN.y,
+            x: 0,
+            y: 0,
           },
         };
         remotesRef.current.set(remoteId, remote);
@@ -401,6 +387,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     });
 
     setIsSharing(false);
+    setLocalScreen(null);
     if (myIdRef.current) {
       broadcast({
         type: "screen-share",
@@ -414,7 +401,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   const startScreenShare = useCallback(async () => {
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: 15 },
+        video: {
+          frameRate: 30,
+          width: { ideal: 1280, max: 1920 },
+          height: { ideal: 720, max: 1080 },
+        },
         audio: false,
       });
       screenStreamRef.current = screenStream;
@@ -423,6 +414,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
       startScreenCallsToAll();
 
+      setLocalScreen(screenStream);
       setIsSharing(true);
       if (myIdRef.current) {
         broadcast({
@@ -443,7 +435,6 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     setupDataConnectionRef.current = setupDataConnection;
     connectToPeerRef.current = connectToPeer;
     stopScreenShareRef.current = stopScreenShare;
-    startScreenCallsRef.current = startScreenCallsToAll;
   });
 
   const startHostConnectRetry = useCallback(() => {
@@ -608,7 +599,6 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     return () => {
       destroyed = true;
       stopHostConnectRetry();
-      cancelAnimationFrame(animationRef.current);
       remotes.forEach((remote) => {
         remote.conn?.close();
         remote.audioCall?.close();
@@ -616,6 +606,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         remote.audioEl?.remove();
       });
       remotes.clear();
+      setLocalScreen(null);
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
       screenStreamRef.current?.getTracks().forEach((t) => t.stop());
       peerRef.current?.destroy();
@@ -632,107 +623,6 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     stopHostConnectRetry,
   ]);
 
-  useEffect(() => {
-    if (!enabled || !connected) return;
-
-    let lastSent = 0;
-    const tick = () => {
-      let dx = 0;
-      let dy = 0;
-
-      const keys = keysRef.current;
-      if (keys.has("w") || keys.has("arrowup")) dy -= MOVE_SPEED;
-      if (keys.has("s") || keys.has("arrowdown")) dy += MOVE_SPEED;
-      if (keys.has("a") || keys.has("arrowleft")) dx -= MOVE_SPEED;
-      if (keys.has("d") || keys.has("arrowright")) dx += MOVE_SPEED;
-
-      const touch = touchInputRef.current;
-      if (touch.x !== 0 || touch.y !== 0) {
-        const len = Math.hypot(touch.x, touch.y);
-        if (len > 0.15) {
-          dx += (touch.x / len) * MOVE_SPEED;
-          dy += (touch.y / len) * MOVE_SPEED;
-        }
-      }
-
-      const target = walkTargetRef.current;
-      if (target) {
-        const { x, y } = positionRef.current;
-        const distX = target.x - x;
-        const distY = target.y - y;
-        const dist = Math.hypot(distX, distY);
-        if (dist < MOVE_SPEED * 1.5) {
-          if (canMoveTo(target.x, target.y)) {
-            positionRef.current.x = target.x;
-            positionRef.current.y = target.y;
-          }
-          walkTargetRef.current = null;
-        } else {
-          dx += (distX / dist) * MOVE_SPEED;
-          dy += (distY / dist) * MOVE_SPEED;
-        }
-      }
-
-      const { x, y } = positionRef.current;
-      if (dx !== 0 && canMoveTo(x + dx, y)) positionRef.current.x += dx;
-      if (dy !== 0 && canMoveTo(x, y + dy)) positionRef.current.y += dy;
-
-      if (walkTargetRef.current) {
-        const { x: nx, y: ny } = positionRef.current;
-        const t = walkTargetRef.current;
-        if (Math.hypot(t.x - nx, t.y - ny) < MOVE_SPEED * 2) {
-          if (!canMoveTo(nx + dx, ny + dy)) walkTargetRef.current = null;
-        }
-      }
-
-      if (myIdRef.current) {
-        const id = myIdRef.current;
-        setPlayers((prev) => ({
-          ...prev,
-          [id]: {
-            ...prev[id],
-            id,
-            name: nameRef.current,
-            color: myColorRef.current,
-            x: positionRef.current.x,
-            y: positionRef.current.y,
-          },
-        }));
-      }
-
-      if (Date.now() - lastSent > 50) {
-        sendPosition();
-        lastSent = Date.now();
-      }
-      animationRef.current = requestAnimationFrame(tick);
-    };
-
-    animationRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animationRef.current);
-  }, [enabled, connected, sendPosition]);
-
-  useEffect(() => {
-    if (!enabled) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      if (
-        ["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(
-          key
-        )
-      ) {
-        keysRef.current.add(key);
-        e.preventDefault();
-      }
-    };
-    const onKeyUp = (e: KeyboardEvent) => keysRef.current.delete(e.key.toLowerCase());
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-    };
-  }, [enabled]);
-
   const toggleMute = useCallback(() => {
     const track = localStreamRef.current?.getAudioTracks()[0];
     if (!track) return;
@@ -743,21 +633,6 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
   const unlockAudio = useCallback(() => {
     void unlockAllRemoteAudio();
-  }, []);
-
-  const setTouchInput = useCallback((x: number, y: number) => {
-    touchInputRef.current = { x, y };
-    walkTargetRef.current = null;
-  }, []);
-
-  const clearTouchInput = useCallback(() => {
-    touchInputRef.current = { x: 0, y: 0 };
-  }, []);
-
-  const setWalkTarget = useCallback((x: number, y: number) => {
-    if (canMoveTo(x, y)) {
-      walkTargetRef.current = { x, y };
-    }
   }, []);
 
   const getShareUrl = useCallback(() => {
@@ -777,13 +652,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     isSharing,
     isHost,
     remoteScreen,
+    localScreen,
     toggleMute,
     startScreenShare,
     stopScreenShare,
     getShareUrl,
-    setTouchInput,
-    clearTouchInput,
-    setWalkTarget,
     unlockAudio,
     roomId,
   };

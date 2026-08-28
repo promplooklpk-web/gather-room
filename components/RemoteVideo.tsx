@@ -59,13 +59,13 @@ export function RemoteVideo({
         autoPlay
         playsInline
         muted={muted}
-        className="h-full w-full rounded-lg bg-black object-contain"
+        className="h-full w-full bg-black object-contain"
       />
       {needsTap && (
         <button
           type="button"
           onClick={() => void tryPlay()}
-          className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/70 text-sm font-medium text-white"
+          className="absolute inset-0 flex items-center justify-center bg-black/70 text-sm font-medium text-white"
         >
           ▶ {t.tapToPlayVideo}
         </button>

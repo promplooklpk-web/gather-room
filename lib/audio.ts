@@ -1,4 +1,13 @@
 const remoteAudioElements = new Set<HTMLAudioElement>();
+let remoteAudioDeafened = false;
+
+export function setRemoteAudioDeafened(deafened: boolean) {
+  remoteAudioDeafened = deafened;
+  remoteAudioElements.forEach((audio) => {
+    audio.muted = deafened;
+    audio.volume = deafened ? 0 : 1;
+  });
+}
 
 export async function getMicStream(): Promise<MediaStream> {
   return navigator.mediaDevices.getUserMedia({
@@ -16,8 +25,8 @@ export async function getMicStream(): Promise<MediaStream> {
 export function createRemoteAudioElement(): HTMLAudioElement {
   const audio = document.createElement("audio");
   audio.autoplay = true;
-  audio.volume = 1;
-  audio.muted = false;
+  audio.volume = remoteAudioDeafened ? 0 : 1;
+  audio.muted = remoteAudioDeafened;
   audio.setAttribute("playsinline", "true");
   audio.setAttribute("webkit-playsinline", "true");
   audio.style.display = "none";
@@ -34,8 +43,8 @@ export function removeRemoteAudioElement(audio: HTMLAudioElement) {
 
 export async function playRemoteAudio(audio: HTMLAudioElement): Promise<boolean> {
   try {
-    audio.volume = 1;
-    audio.muted = false;
+    audio.volume = remoteAudioDeafened ? 0 : 1;
+    audio.muted = remoteAudioDeafened;
     await audio.play();
     return true;
   } catch {
