@@ -1,4 +1,4 @@
-import type { PeerConnectOption, PeerError } from "peerjs";
+import type { MediaConnection, PeerConnectOption, PeerError } from "peerjs";
 
 export const PEER_OPTIONS = {
   host: "0.peerjs.com",
@@ -29,6 +29,20 @@ export const CONNECT_OPTIONS: PeerConnectOption = {
 };
 
 export const SCREEN_CALL_META = { type: "screen" as const };
+
+export function isMediaCallLive(call?: MediaConnection | null): boolean {
+  if (!call) return false;
+  const pc = call.peerConnection as RTCPeerConnection | undefined;
+  const connState = pc?.connectionState;
+  const iceState = pc?.iceConnectionState;
+  if (connState === "failed" || connState === "closed" || connState === "disconnected") {
+    return false;
+  }
+  if (iceState === "failed" || iceState === "closed" || iceState === "disconnected") {
+    return false;
+  }
+  return true;
+}
 
 /** Errors that are expected during normal join / flaky mobile networks. */
 export function isTransientPeerError(err: PeerError<string>): boolean {

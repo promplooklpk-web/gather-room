@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Peer, { DataConnection, MediaConnection } from "peerjs";
 import {
+  attachRemoteAudioStream,
   createRemoteAudioElement,
   getMicStream,
   getMicTrack,
@@ -14,6 +15,7 @@ import {
   CONNECT_OPTIONS,
   PEER_OPTIONS,
   SCREEN_CALL_META,
+  isMediaCallLive,
   isTransientPeerError,
   makeGuestPeerId,
 } from "@/lib/peerConfig";
@@ -32,6 +34,11 @@ function isConnInFlight(conn?: DataConnection, startedAt?: number) {
   const state = (conn.peerConnection as RTCPeerConnection | undefined)
     ?.connectionState;
   return !state || state === "new" || state === "connecting" || state === "connected";
+}
+
+function shouldOfferAudio(myId: string | null, remoteId: string) {
+  if (!myId) return false;
+  return myId < remoteId;
 }
 
 interface RemotePeer {
@@ -77,6 +84,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   const nameRef = useRef(name);
   const connectToPeerRef = useRef<(remoteId: string) => void>(() => {});
   const stopScreenShareRef = useRef<() => void>(() => {});
+  const startScreenCallToPeerRef = useRef<(remoteId: string, force?: boolean) => void>(
+    () => {}
+  );
   const hostConnectTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopHostConnectRetryRef = useRef<() => void>(() => {});
   const tryTakeoverRef = useRef<() => void>(() => {});
@@ -163,22 +173,38 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         };
         remotesRef.current.set(remoteId, remote);
       }
+
+      if (remote.audioCall && remote.audioCall !== call && isMediaCallLive(remote.audioCall)) {
+        try {
+          call.close();
+        } catch {
+          /* duplicate glare call */
+        }
+        return;
+      }
+
       remote.audioCall = call;
 
       call.on("stream", (remoteStream) => {
         const audioTracks = remoteStream.getAudioTracks();
         if (audioTracks.length === 0) return;
+        const localTrackId = localStreamRef.current?.getAudioTracks()[0]?.id;
+        if (localTrackId && audioTracks.some((track) => track.id === localTrackId)) {
+          return;
+        }
 
         if (!remote!.audioEl) {
           remote!.audioEl = createRemoteAudioElement();
         }
-        remote!.audioEl!.srcObject = new MediaStream(audioTracks);
+        attachRemoteAudioStream(remote!.audioEl, remoteStream);
         void playRemoteAudio(remote!.audioEl!);
       });
 
-      call.on("close", () => {
-        remote!.audioCall = undefined;
-      });
+      const clearIfCurrent = () => {
+        if (remote!.audioCall === call) remote!.audioCall = undefined;
+      };
+      call.on("close", clearIfCurrent);
+      call.on("error", clearIfCurrent);
     },
     []
   );
@@ -200,17 +226,35 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         remotesRef.current.set(remoteId, remote);
       }
 
+      let lastNeedScreen = 0;
+      const requestScreenAgain = () => {
+        const now = Date.now();
+        if (now - lastNeedScreen < 3000) return;
+        lastNeedScreen = now;
+        const conn = remotesRef.current.get(remoteId)?.conn;
+        if (conn?.open) {
+          conn.send({ type: "need-screen" } satisfies SignalingMessage);
+        }
+      };
+
       call.on("stream", (remoteStream) => {
         const videoTracks = remoteStream.getVideoTracks();
         if (videoTracks.length === 0) return;
         attachRemoteScreen(remoteId, remoteStream);
+        videoTracks.forEach((track) => {
+          track.onended = () => requestScreenAgain();
+          track.onmute = () => {
+            window.setTimeout(() => {
+              if (track.muted) requestScreenAgain();
+            }, 2500);
+          };
+        });
       });
 
-      call.on("close", () => {
-        clearRemoteScreen(remoteId);
-      });
+      call.on("close", () => requestScreenAgain());
+      call.on("error", () => requestScreenAgain());
     },
-    [attachRemoteScreen, clearRemoteScreen]
+    [attachRemoteScreen]
   );
 
   const collectRoster = useCallback((): PeerInfo[] => {
@@ -295,6 +339,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           updatePlayer(msg.peerId, { isSharingScreen: msg.isSharing });
           if (!msg.isSharing) {
             clearRemoteScreen(msg.peerId);
+          }
+          break;
+        case "need-screen":
+          if (screenStreamRef.current && fromConn) {
+            startScreenCallToPeerRef.current(fromConn.peer, true);
           }
           break;
       }
@@ -390,13 +439,14 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     [broadcast, handleSignalingMessage, removePlayer, collectRoster]
   );
 
-  const startScreenCallToPeer = useCallback((remoteId: string) => {
+  const startScreenCallToPeer = useCallback((remoteId: string, force = false) => {
     const peer = peerRef.current;
     const screenStream = screenStreamRef.current;
     if (!peer || !screenStream) return;
 
     const remote = remotesRef.current.get(remoteId);
     if (!remote) return;
+    if (!force && isMediaCallLive(remote.screenCall)) return;
 
     remote.screenCall?.close();
     const call = peer.call(remoteId, screenStream, { metadata: SCREEN_CALL_META });
@@ -426,11 +476,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       if (!isConnInFlight(remote?.conn, remote?.connStartedAt)) {
         setupDataConnection(peer.connect(remoteId, CONNECT_OPTIONS));
       }
-      if (localStreamRef.current && !remote?.audioCall) {
+      if (localStreamRef.current && !isMediaCallLive(remote?.audioCall) && shouldOfferAudio(myIdRef.current, remoteId)) {
         const call = peer.call(remoteId, localStreamRef.current);
         if (call) setupAudioCall(call);
       }
-      if (screenStreamRef.current) {
+      if (screenStreamRef.current && !isMediaCallLive(remote?.screenCall)) {
         startScreenCallToPeer(remoteId);
       }
     },
@@ -476,15 +526,18 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
-          frameRate: 30,
-          width: { ideal: 1280, max: 1920 },
-          height: { ideal: 720, max: 1080 },
+          frameRate: { ideal: 15, max: 24 },
+          width: { ideal: 1280, max: 1280 },
+          height: { ideal: 720, max: 720 },
         },
         audio: false,
       });
       screenStreamRef.current = screenStream;
       const videoTrack = screenStream.getVideoTracks()[0];
-      videoTrack.onended = () => stopScreenShareRef.current();
+      if (videoTrack) {
+        videoTrack.contentHint = "detail";
+        videoTrack.onended = () => stopScreenShareRef.current();
+      }
 
       startScreenCallsToAll();
 
@@ -509,6 +562,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     setupDataConnectionRef.current = setupDataConnection;
     connectToPeerRef.current = connectToPeer;
     stopScreenShareRef.current = stopScreenShare;
+    startScreenCallToPeerRef.current = startScreenCallToPeer;
   });
 
   const startHostConnectRetry = useCallback(() => {
@@ -583,7 +637,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           getMicTrack(localStreamRef.current) ?? new MediaStream();
 
         if (meta?.type === "screen") {
-          call.answer(answerStream);
+          call.answer(new MediaStream());
           setupScreenReceiveCall(call);
           return;
         }
@@ -767,6 +821,36 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     const id = window.setInterval(tick, 2000);
     return () => window.clearInterval(id);
   }, [enabled, isHost, broadcast, collectRoster]);
+
+  useEffect(() => {
+    if (!enabled || !isSharing) return;
+    const id = window.setInterval(() => {
+      remotesRef.current.forEach((remote) => {
+        if (!isMediaCallLive(remote.screenCall)) {
+          startScreenCallToPeer(remote.info.id);
+        }
+      });
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [enabled, isSharing, startScreenCallToPeer]);
+
+  useEffect(() => {
+    if (!enabled || !connected) return;
+    const id = window.setInterval(() => {
+      const me = myIdRef.current;
+      const mic = localStreamRef.current;
+      const peer = peerRef.current;
+      if (!me || !mic || !peer) return;
+      remotesRef.current.forEach((remote) => {
+        if (isMediaCallLive(remote.audioCall)) return;
+        const waitedLongEnough = Date.now() - (remote.connStartedAt ?? 0) > 8000;
+        if (!shouldOfferAudio(me, remote.info.id) && !waitedLongEnough) return;
+        const call = peer.call(remote.info.id, mic);
+        if (call) setupAudioCall(call);
+      });
+    }, 4000);
+    return () => window.clearInterval(id);
+  }, [enabled, connected, setupAudioCall]);
 
   const toggleMute = useCallback(() => {
     const track = localStreamRef.current?.getAudioTracks()[0];

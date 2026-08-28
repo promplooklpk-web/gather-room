@@ -45,9 +45,21 @@ export function RemoteVideo({
     const onCanPlay = () => void tryPlay();
     video.addEventListener("loadedmetadata", onCanPlay);
     video.addEventListener("canplay", onCanPlay);
+
+    const tracks = stream.getVideoTracks();
+    const onUnmute = () => void tryPlay();
+    tracks.forEach((track) => {
+      track.addEventListener("unmute", onUnmute);
+      track.addEventListener("ended", onUnmute);
+    });
+
     return () => {
       video.removeEventListener("loadedmetadata", onCanPlay);
       video.removeEventListener("canplay", onCanPlay);
+      tracks.forEach((track) => {
+        track.removeEventListener("unmute", onUnmute);
+        track.removeEventListener("ended", onUnmute);
+      });
       video.srcObject = null;
     };
   }, [stream, muted, tryPlay]);

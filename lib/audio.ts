@@ -10,14 +10,15 @@ export function setRemoteAudioDeafened(deafened: boolean) {
 }
 
 export async function getMicStream(): Promise<MediaStream> {
+  const audioConstraints: MediaTrackConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+    channelCount: 1,
+  };
+
   const request = navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-      sampleRate: { ideal: 48000 },
-      channelCount: { ideal: 1 },
-    },
+    audio: audioConstraints,
     video: false,
   });
 
@@ -25,7 +26,19 @@ export async function getMicStream(): Promise<MediaStream> {
     window.setTimeout(() => reject(new Error("mic-timeout")), 12000);
   });
 
-  return Promise.race([request, timeout]);
+  const stream = await Promise.race([request, timeout]);
+  stream.getAudioTracks().forEach((track) => {
+    void track
+      .applyConstraints({
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      })
+      .catch(() => {
+        /* Safari may reject extra constraints */
+      });
+  });
+  return stream;
 }
 
 export function createRemoteAudioElement(): HTMLAudioElement {
@@ -39,6 +52,13 @@ export function createRemoteAudioElement(): HTMLAudioElement {
   document.body.appendChild(audio);
   remoteAudioElements.add(audio);
   return audio;
+}
+
+export function attachRemoteAudioStream(
+  audio: HTMLAudioElement,
+  stream: MediaStream
+) {
+  audio.srcObject = new MediaStream(stream.getAudioTracks());
 }
 
 export function removeRemoteAudioElement(audio: HTMLAudioElement) {

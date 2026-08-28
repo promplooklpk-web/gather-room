@@ -14,7 +14,8 @@ export type SignalingMessage =
   | { type: "peer-joined"; peer: PeerInfo }
   | { type: "peer-left"; peerId: string }
   | { type: "position"; peerId: string; x: number; y: number }
-  | { type: "screen-share"; peerId: string; isSharing: boolean };
+  | { type: "screen-share"; peerId: string; isSharing: boolean }
+  | { type: "need-screen" };
 
 export interface PeerInfo {
   id: string;
