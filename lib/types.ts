@@ -15,7 +15,8 @@ export type SignalingMessage =
   | { type: "peer-left"; peerId: string }
   | { type: "position"; peerId: string; x: number; y: number }
   | { type: "screen-share"; peerId: string; isSharing: boolean }
-  | { type: "need-screen" };
+  | { type: "need-screen" }
+  | { type: "need-relay" };
 
 export interface PeerInfo {
   id: string;
@@ -23,4 +24,5 @@ export interface PeerInfo {
   color: string;
   x: number;
   y: number;
+  isSharingScreen?: boolean;
 }

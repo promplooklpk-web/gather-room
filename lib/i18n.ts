@@ -25,7 +25,7 @@ export const t = {
   screenShareTitle: "หน้าจอที่แชร์",
   sharingActive: "กำลังแชร์หน้าจอของคุณ",
   sharingTheirScreen: "กำลังแชร์หน้าจอ",
-  waitingForShare: "รอหน้าจอจากเพื่อน...",
+  waitingForShare: "รอหน้าจอจากเพื่อน — แตะหน้าจอถ้าภาพไม่ขึ้น",
   tapToPlayVideo: "แตะเพื่อดูวิดีโอ",
   tapToUnmuteAudio: "แตะเพื่อเปิดเสียง",
   micDenied:

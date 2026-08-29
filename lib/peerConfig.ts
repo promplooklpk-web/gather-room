@@ -53,6 +53,70 @@ export const CONNECT_OPTIONS: PeerConnectOption = {
 
 export const SCREEN_CALL_META = { type: "screen" as const };
 
+/** If STUN never yields a server-reflexive candidate, UDP is likely blocked (VPN). */
+export function probeUdpBlocked(timeoutMs = 2000): Promise<boolean> {
+  if (typeof RTCPeerConnection === "undefined") return Promise.resolve(false);
+  return new Promise((resolve) => {
+    let settled = false;
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    });
+    const finish = (blocked: boolean) => {
+      if (settled) return;
+      settled = true;
+      try {
+        pc.close();
+      } catch {
+        /* already closed */
+      }
+      resolve(blocked);
+    };
+    pc.addEventListener("icecandidate", (ev) => {
+      const cand = ev.candidate;
+      if (!cand) return;
+      const typ =
+        cand.type || / typ ([a-z]+)/.exec(cand.candidate || "")?.[1];
+      if (typ === "srflx" || typ === "relay") finish(false);
+    });
+    try {
+      pc.createDataChannel("vpn-probe");
+      void pc
+        .createOffer()
+        .then((offer) => pc.setLocalDescription(offer))
+        .catch(() => finish(false));
+    } catch {
+      finish(false);
+      return;
+    }
+    window.setTimeout(() => finish(true), timeoutMs);
+  });
+}
+
+/** Keep screen-share bitrate low enough to survive TCP TURN. */
+export function constrainScreenSenders(pc: RTCPeerConnection | undefined): void {
+  if (!pc) return;
+  const apply = () => {
+    pc.getSenders().forEach((sender) => {
+      if (sender.track?.kind !== "video") return;
+      const params = sender.getParameters() as RTCRtpSendParameters;
+      if (!params.encodings || params.encodings.length === 0) {
+        params.encodings = [{ rid: "0" }];
+      }
+      params.encodings[0].maxBitrate = 600_000;
+      params.encodings[0].maxFramerate = 12;
+      void sender.setParameters(params).catch(() => {
+        /* Safari may reject encodings before negotiation */
+      });
+    });
+  };
+  apply();
+  pc.addEventListener("connectionstatechange", () => {
+    if (pc.connectionState === "connected" || pc.connectionState === "connecting") {
+      apply();
+    }
+  });
+}
+
 const watchedIce = new WeakSet<RTCPeerConnection>();
 
 /**
