@@ -6,6 +6,7 @@ import { ServerRail } from "@/components/discord/ServerRail";
 import { ChannelSidebar } from "@/components/discord/ChannelSidebar";
 import { FloatingControlBar } from "@/components/discord/FloatingControlBar";
 import { ScreenStage } from "@/components/discord/VoiceStage";
+import { ConnectionStrip } from "@/components/discord/ConnectionStrip";
 import { t } from "@/lib/i18n";
 import { setRemoteAudioDeafened } from "@/lib/audio";
 import {
@@ -42,6 +43,8 @@ function VoiceRoomSession({
     myPlayer,
     players,
     connected,
+    connectionStatus,
+    connectionQuality,
     error,
     isMuted,
     isSharing,
@@ -52,6 +55,7 @@ function VoiceRoomSession({
     stopScreenShare,
     getShareUrl,
     unlockAudio,
+    retryConnection,
   } = usePeerRoom({ name: userName, roomId, enabled: true });
 
   const [needsAudioUnlock, setNeedsAudioUnlock] = useState(
@@ -103,6 +107,8 @@ function VoiceRoomSession({
         players={players}
         myId={myId}
         connected={connected}
+        connectionStatus={connectionStatus}
+        connectionQuality={connectionQuality}
         isMuted={isMuted}
         isDeafened={isDeafened}
         isSharing={isSharing}
@@ -118,19 +124,25 @@ function VoiceRoomSession({
         onStopShare={stopScreenShare}
         onDisconnect={onLogout}
         onCopyLink={handleCopyLink}
+        onRetryConnection={retryConnection}
       />
 
       <main className="relative flex min-w-0 flex-1 flex-col bg-[#313338]">
-        <header className="flex h-12 shrink-0 items-center border-b border-[#1f2023] px-4 shadow-sm">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-[#1f2023] px-4 shadow-sm">
           <span className="text-[#949ba4]">🔊</span>
-          <h2 className="ml-2 text-[15px] font-semibold text-white">
+          <h2 className="text-[15px] font-semibold text-white">
             {roomLabel}
           </h2>
-          {connected && (
-            <span className="ml-3 rounded bg-[#23a559]/20 px-2 py-0.5 text-[11px] font-semibold text-[#23a559]">
+          {connectionStatus === "connected" && (
+            <span className="rounded bg-[#23a559]/20 px-2 py-0.5 text-[11px] font-semibold text-[#23a559]">
               {t.live}
             </span>
           )}
+          <ConnectionStrip
+            status={connectionStatus}
+            quality={connectionQuality}
+            onRetry={retryConnection}
+          />
         </header>
 
         {error && (

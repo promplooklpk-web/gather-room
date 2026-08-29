@@ -40,6 +40,8 @@ export function ParticipantTiles({
           <div
             key={p.id}
             className={`relative overflow-hidden rounded-lg bg-[#1e1f22] ring-1 ring-black/40 ${
+              p.disconnected ? "opacity-50" : ""
+            } ${
               compact
                 ? "h-[72px] w-[128px]"
                 : players.length === 1

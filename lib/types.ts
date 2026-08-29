@@ -1,3 +1,6 @@
+export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "failed";
+export type ConnectionQuality = "good" | "fair" | "poor" | "relay";
+
 export interface PlayerState {
   id: string;
   name: string;
@@ -5,6 +8,7 @@ export interface PlayerState {
   y: number;
   color: string;
   isSharingScreen?: boolean;
+  disconnected?: boolean;
 }
 
 export type SignalingMessage =

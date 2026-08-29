@@ -4,6 +4,7 @@ import type {
   PeerError,
   PeerJSOption,
 } from "peerjs";
+import type { ConnectionQuality } from "@/lib/types";
 
 /**
  * ICE servers for mesh P2P (data + media).
@@ -120,8 +121,9 @@ export function constrainScreenSenders(pc: RTCPeerConnection | undefined): void 
 const watchedIce = new WeakSet<RTCPeerConnection>();
 
 /**
- * Restart ICE once on failure, then give up so the room can recreate
- * the Peer with `iceTransportPolicy: "relay"` (VPN / UDP-blocked path).
+ * Restart ICE once on failure. Data-channel callers should recreate the Peer
+ * with `iceTransportPolicy: "relay"` after this fires. Media callers should
+ * retry the call instead of tearing down the Peer.
  */
 export function watchRtcIce(
   pc: RTCPeerConnection | undefined,
@@ -213,8 +215,86 @@ export function isTransientPeerError(err: PeerError<string>): boolean {
   ].includes(err.type);
 }
 
-export function makeGuestPeerId(roomId: string): string {
+function guestIdStorageKey(roomId: string) {
+  return `mtlclick-guest-id:${roomId}`;
+}
+
+function randomGuestPeerId(roomId: string) {
   return `mtlclick-${roomId}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Stable per-tab guest id so a brief disconnect can rejoin the same mesh slot. */
+export function makeGuestPeerId(roomId: string): string {
+  if (typeof sessionStorage === "undefined") return randomGuestPeerId(roomId);
+  try {
+    const key = guestIdStorageKey(roomId);
+    const existing = sessionStorage.getItem(key);
+    if (existing) return existing;
+    const id = randomGuestPeerId(roomId);
+    sessionStorage.setItem(key, id);
+    return id;
+  } catch {
+    return randomGuestPeerId(roomId);
+  }
+}
+
+export function rotateGuestPeerId(roomId: string): string {
+  const id = randomGuestPeerId(roomId);
+  if (typeof sessionStorage === "undefined") return id;
+  try {
+    sessionStorage.setItem(guestIdStorageKey(roomId), id);
+  } catch {
+    /* private mode / quota */
+  }
+  return id;
+}
+
+export async function inspectIceQuality(
+  pc?: RTCPeerConnection
+): Promise<{ candidateType: string; rtt?: number } | null> {
+  if (!pc) return null;
+  try {
+    const stats = await pc.getStats();
+    let selected: RTCStats | undefined;
+    stats.forEach((report) => {
+      const pair = report as RTCIceCandidatePairStats & { nominated?: boolean };
+      if (pair.type !== "candidate-pair" || pair.state !== "succeeded") return;
+      if (pair.nominated) selected = pair;
+      else if (!selected) selected = pair;
+    });
+    if (!selected) return null;
+    const remoteId = (selected as RTCIceCandidatePairStats).remoteCandidateId;
+    const remote = remoteId ? stats.get(remoteId) : undefined;
+    const candidateType =
+      (remote as { candidateType?: string } | undefined)?.candidateType ??
+      "unknown";
+    const rtt = (selected as RTCIceCandidatePairStats).currentRoundTripTime;
+    return { candidateType, rtt };
+  } catch {
+    return null;
+  }
+}
+
+export function qualityFromIce(
+  samples: Array<{ candidateType: string; rtt?: number } | null>,
+  forcedRelay: boolean
+): ConnectionQuality {
+  if (forcedRelay) return "relay";
+  const ok = samples.filter(
+    (s): s is { candidateType: string; rtt?: number } => s != null
+  );
+  if (ok.length === 0) return "fair";
+  if (ok.some((s) => s.candidateType === "relay")) return "relay";
+  const rtts = ok
+    .map((s) => s.rtt)
+    .filter((n): n is number => typeof n === "number");
+  const maxRtt = rtts.length ? Math.max(...rtts) : 0;
+  if (maxRtt >= 0.4) return "poor";
+  if (maxRtt >= 0.15) return "fair";
+  if (ok.some((s) => s.candidateType === "srflx" || s.candidateType === "prflx")) {
+    return "fair";
+  }
+  return "good";
 }
 
 export function isInAppBrowser(): boolean {

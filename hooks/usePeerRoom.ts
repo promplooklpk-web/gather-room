@@ -16,20 +16,31 @@ import {
   SCREEN_CALL_META,
   constrainScreenSenders,
   getPeerOptions,
+  inspectIceQuality,
   isMediaCallLive,
   isTransientPeerError,
   makeGuestPeerId,
+  qualityFromIce,
+  rotateGuestPeerId,
   isIosDevice,
   watchRtcIce,
 } from "@/lib/peerConfig";
 import { pickColor } from "@/lib/colors";
 import { getRoomHostId, getShareUrl as buildShareUrl } from "@/lib/rooms";
-import type { PeerInfo, PlayerState, SignalingMessage } from "@/lib/types";
+import type {
+  ConnectionQuality,
+  ConnectionStatus,
+  PeerInfo,
+  PlayerState,
+  SignalingMessage,
+} from "@/lib/types";
 
 const HOST_CONNECT_MAX_ATTEMPTS = 24;
 const HOST_CONNECT_INTERVAL_MS = 1500;
 const RELAY_FALLBACK_AFTER = 10;
 const RELAY_RECREATE_DELAY_MS = 1000;
+const PEER_LEAVE_GRACE_MS = 20_000;
+const DATA_RECONNECT_DELAY_MS = 400;
 
 function isConnInFlight(conn?: DataConnection, startedAt?: number) {
   if (!conn) return false;
@@ -56,6 +67,7 @@ interface RemotePeer {
   info: PeerInfo;
   conn?: DataConnection;
   connStartedAt?: number;
+  disconnectedAt?: number;
   audioCall?: MediaConnection;
   screenCall?: MediaConnection;
   audioEl?: HTMLAudioElement;
@@ -73,6 +85,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   const [isHost, setIsHost] = useState(false);
   const [players, setPlayers] = useState<Record<string, PlayerState>>({});
   const [connected, setConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] =
+    useState<ConnectionStatus>("connecting");
+  const [connectionQuality, setConnectionQuality] =
+    useState<ConnectionQuality>("fair");
+  const [retryNonce, setRetryNonce] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
@@ -100,6 +117,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   );
   const hostConnectTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopHostConnectRetryRef = useRef<() => void>(() => {});
+  const startHostConnectRetryRef = useRef<() => void>(() => {});
   const tryTakeoverRef = useRef<() => void>(() => {});
   const forceRelayRef = useRef(false);
   const switchingRelayRef = useRef(false);
@@ -130,7 +148,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         existing.color === next.color &&
         existing.x === next.x &&
         existing.y === next.y &&
-        existing.isSharingScreen === next.isSharingScreen
+        existing.isSharingScreen === next.isSharingScreen &&
+        existing.disconnected === next.disconnected
       ) {
         return prev;
       }
@@ -334,8 +353,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       peers.forEach((p) => {
         if (p.id === myIdRef.current) return;
         const remote = remotesRef.current.get(p.id);
-        if (remote) remote.info = p;
-        updatePlayer(p.id, p);
+        if (remote) {
+          remote.info = p;
+          remote.disconnectedAt = undefined;
+        }
+        updatePlayer(p.id, { ...p, disconnected: false });
         connectToPeerRef.current(p.id);
       });
     },
@@ -350,8 +372,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         case "hello": {
           const remote = remotesRef.current.get(msg.peer.id);
           const firstHello = !remote || remote.info.name === "???";
-          if (remote) remote.info = msg.peer;
-          updatePlayer(msg.peer.id, msg.peer);
+          if (remote) {
+            remote.info = msg.peer;
+            remote.disconnectedAt = undefined;
+          }
+          updatePlayer(msg.peer.id, { ...msg.peer, disconnected: false });
           if (!firstHello) break;
           connectToPeerRef.current(msg.peer.id);
           if (isHostRef.current && myIdRef.current) {
@@ -399,7 +424,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         }
         case "peer-joined": {
           if (msg.peer.id === myIdRef.current) return;
-          updatePlayer(msg.peer.id, msg.peer);
+          updatePlayer(msg.peer.id, { ...msg.peer, disconnected: false });
           connectToPeerRef.current(msg.peer.id);
           break;
         }
@@ -495,8 +520,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       };
 
       conn.on("open", () => {
+        remote.disconnectedAt = undefined;
+        updatePlayer(remoteId, { disconnected: false });
         if (conn.peer === roomHostIdRef.current) {
           stopHostConnectRetryRef.current();
+          setConnectionStatus("connected");
           setError((prev) =>
             prev?.startsWith("เชื่อมต่อไม่สำเร็จ") ? null : prev
           );
@@ -512,24 +540,31 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         handleSignalingMessage(data as SignalingMessage, conn);
       });
 
-      conn.on("error", () => {
-        if (remote!.conn === conn) remote!.conn = undefined;
-      });
-
-      conn.on("close", () => {
-        if (remote!.conn === conn) remote!.conn = undefined;
-        if (isHostRef.current) {
-          broadcast({ type: "peer-left", peerId: remoteId });
+      const onDataLost = () => {
+        if (remote.conn === conn) remote.conn = undefined;
+        if (!remote.disconnectedAt) remote.disconnectedAt = Date.now();
+        updatePlayer(remoteId, { disconnected: true });
+        if (remoteId === roomHostIdRef.current) {
+          setConnectionStatus((prev) =>
+            prev === "failed" ? prev : "reconnecting"
+          );
+          startHostConnectRetryRef.current();
         }
-        removePlayer(remoteId);
-      });
+        window.setTimeout(() => {
+          connectToPeerRef.current(remoteId);
+        }, DATA_RECONNECT_DELAY_MS);
+      };
+
+      conn.on("error", onDataLost);
+      conn.on("close", onDataLost);
 
       if (conn.open) {
+        remote.disconnectedAt = undefined;
         sendHello();
         sendRosterIfHost();
       }
     },
-    [broadcast, handleSignalingMessage, removePlayer, collectRoster, myPeerInfo]
+    [handleSignalingMessage, collectRoster, myPeerInfo, updatePlayer]
   );
 
   const startScreenCallToPeer = useCallback((remoteId: string, force = false) => {
@@ -661,13 +696,33 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     stopScreenShareRef.current = stopScreenShare;
     startScreenCallToPeerRef.current = startScreenCallToPeer;
     onIceFailureRef.current = (kind) => {
-      if (forceRelayRef.current || switchingRelayRef.current) return;
-      if (kind === "data") {
-        for (const remote of remotesRef.current.values()) {
-          const pc = remote.conn?.peerConnection as RTCPeerConnection | undefined;
-          if (remote.conn?.open && isRtcHealthy(pc)) return;
-        }
+      if (kind === "media") {
+        remotesRef.current.forEach((remote) => {
+          if (screenStreamRef.current && !isMediaCallLive(remote.screenCall)) {
+            startScreenCallToPeerRef.current(remote.info.id, true);
+          }
+          if (
+            remote.info.isSharingScreen &&
+            !isMediaCallLive(remote.screenCall) &&
+            remote.conn?.open
+          ) {
+            try {
+              remote.conn.send({ type: "need-screen" } satisfies SignalingMessage);
+            } catch {
+              /* channel may not be ready */
+            }
+          }
+        });
+        return;
       }
+      if (forceRelayRef.current || switchingRelayRef.current) return;
+      const remotes = Array.from(remotesRef.current.values());
+      if (remotes.length === 0) return;
+      const hasHealthyData = remotes.some((remote) => {
+        const pc = remote.conn?.peerConnection as RTCPeerConnection | undefined;
+        return Boolean(remote.conn?.open && isRtcHealthy(pc));
+      });
+      if (hasHealthyData) return;
       switchToRelayRef.current();
     };
   });
@@ -715,6 +770,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           hostConnectTimerRef.current = null;
         }
         setError("เชื่อมต่อไม่สำเร็จ / Connection failed. ลองรีเฟรชหน้า");
+        setConnectionStatus("failed");
       }
     }, HOST_CONNECT_INTERVAL_MS);
   }, []);
@@ -728,6 +784,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
   useEffect(() => {
     stopHostConnectRetryRef.current = stopHostConnectRetry;
+    startHostConnectRetryRef.current = startHostConnectRetry;
   });
 
   useEffect(() => {
@@ -739,6 +796,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     const roomHostId = roomHostIdRef.current;
     forceRelayRef.current = false;
     switchingRelayRef.current = false;
+    const reclaimHostId = isHostRef.current;
+    isHostRef.current = false;
+    myIdRef.current = null;
 
     let session = 0;
     let relayTimer: ReturnType<typeof setTimeout> | null = null;
@@ -777,6 +837,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
       peer.on("disconnected", () => {
         if (destroyed || !peer.id) return;
+        setConnectionStatus("reconnecting");
         try {
           peer.reconnect();
         } catch {
@@ -788,6 +849,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         console.error("Peer error:", err);
         if (isTransientPeerError(err)) return;
         setError("เชื่อมต่อไม่สำเร็จ / Connection failed. ลองรีเฟรชหน้า");
+        setConnectionStatus("failed");
       });
     }
 
@@ -811,6 +873,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
       announceJoin(id);
       setConnected(true);
+      setConnectionStatus("connected");
+      if (forceRelayRef.current) setConnectionQuality("relay");
 
       if (screenStreamRef.current) {
         remotesRef.current.forEach((remote) => {
@@ -832,7 +896,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       }
     }
 
-    function openGuestPeer(): void {
+    function openGuestPeer(reclaimTries = 0): void {
       if (destroyed) return;
       const mySession = ++session;
 
@@ -850,11 +914,19 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         console.error("Guest peer error:", err);
         if (err.type === "unavailable-id" && !destroyed && mySession === session) {
           peer.destroy();
-          openGuestPeer();
+          if (reclaimTries < 6) {
+            window.setTimeout(() => {
+              if (!destroyed) openGuestPeer(reclaimTries + 1);
+            }, RELAY_RECREATE_DELAY_MS);
+            return;
+          }
+          rotateGuestPeerId(roomId);
+          openGuestPeer(0);
           return;
         }
         if (!isTransientPeerError(err)) {
           setError("เชื่อมต่อไม่สำเร็จ / Connection failed. ลองรีเฟรชหน้า");
+          setConnectionStatus("failed");
         }
       });
     }
@@ -876,7 +948,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         console.error("Host peer error:", err);
         if (err.type === "unavailable-id" && mySession === session) {
           hostPeer.destroy();
-          if (forceRelayRef.current && isHostRef.current && reclaimTries < 8) {
+          if ((isHostRef.current || reclaimHostId) && reclaimTries < 8) {
             window.setTimeout(() => {
               if (!destroyed) openHostPeer(reclaimTries + 1);
             }, RELAY_RECREATE_DELAY_MS);
@@ -887,6 +959,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         }
         if (!isTransientPeerError(err)) {
           setError("เชื่อมต่อไม่สำเร็จ / Connection failed. ลองรีเฟรชหน้า");
+          setConnectionStatus("failed");
         }
       });
     }
@@ -900,10 +973,10 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
     function switchToRelayAndRejoin() {
       if (destroyed || forceRelayRef.current || switchingRelayRef.current) return;
-      // Recreating the host drops the room; only guests (or a sharer) switch.
-      if (isHostRef.current && !screenStreamRef.current) return;
       forceRelayRef.current = true;
       switchingRelayRef.current = true;
+      setConnectionStatus("reconnecting");
+      setConnectionQuality("relay");
       stopHostConnectRetry();
       const wasHost = isHostRef.current;
       dropAllRemotes();
@@ -1001,8 +1074,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       });
       remotes.clear();
       setLocalScreen(null);
+      setIsSharing(false);
+      setConnected(false);
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
       screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+      screenStreamRef.current = null;
       peerRef.current?.destroy();
       peerRef.current = null;
     };
@@ -1010,6 +1086,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     enabled,
     name,
     roomId,
+    retryNonce,
     announceJoin,
     setupAudioCall,
     setupScreenReceiveCall,
@@ -1059,7 +1136,6 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
   useEffect(() => {
     if (!enabled || !connected) return;
-    let askedRelay = false;
     const id = window.setInterval(() => {
       const me = myIdRef.current;
       if (!me) return;
@@ -1070,15 +1146,72 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         const conn = remotesRef.current.get(p.id)?.conn;
         if (!conn?.open) return;
         conn.send({ type: "need-screen" } satisfies SignalingMessage);
-        if (!askedRelay && !forceRelayRef.current) {
-          askedRelay = true;
-          conn.send({ type: "need-relay" } satisfies SignalingMessage);
-          switchToRelayRef.current();
-        }
       });
     }, 6000);
     return () => window.clearInterval(id);
   }, [enabled, connected, players, remoteScreen]);
+
+  useEffect(() => {
+    if (!enabled || !connected) return;
+    const id = window.setInterval(() => {
+      const now = Date.now();
+      remotesRef.current.forEach((remote) => {
+        const peerId = remote.info.id;
+        if (remote.conn?.open) {
+          if (remote.disconnectedAt) {
+            remote.disconnectedAt = undefined;
+            updatePlayer(peerId, { disconnected: false });
+          }
+          return;
+        }
+        if (
+          remote.disconnectedAt &&
+          now - remote.disconnectedAt >= PEER_LEAVE_GRACE_MS
+        ) {
+          if (isHostRef.current) {
+            broadcast({ type: "peer-left", peerId });
+          }
+          removePlayer(peerId);
+          return;
+        }
+        connectToPeerRef.current(peerId);
+      });
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [enabled, connected, broadcast, removePlayer, updatePlayer]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (forceRelayRef.current) {
+        if (!cancelled) setConnectionQuality("relay");
+        return;
+      }
+      const samples: Array<{ candidateType: string; rtt?: number } | null> = [];
+      for (const remote of remotesRef.current.values()) {
+        samples.push(
+          await inspectIceQuality(
+            remote.conn?.peerConnection as RTCPeerConnection | undefined
+          )
+        );
+        samples.push(
+          await inspectIceQuality(
+            remote.screenCall?.peerConnection as RTCPeerConnection | undefined
+          )
+        );
+      }
+      if (!cancelled) {
+        setConnectionQuality(qualityFromIce(samples, forceRelayRef.current));
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [enabled, connected, connectionStatus]);
 
   useEffect(() => {
     if (!enabled || !connected) return;
@@ -1112,11 +1245,23 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
   const getShareUrl = useCallback(() => buildShareUrl(roomId), [roomId]);
 
+  const retryConnection = useCallback(() => {
+    setError(null);
+    setConnectionStatus("connecting");
+    setConnectionQuality("fair");
+    setConnected(false);
+    setIsHost(false);
+    setMyId(null);
+    setRetryNonce((n) => n + 1);
+  }, []);
+
   return {
     myId,
     myPlayer: myId ? players[myId] : null,
     players: Object.values(players),
     connected,
+    connectionStatus,
+    connectionQuality,
     error,
     isMuted,
     isSharing,
@@ -1128,6 +1273,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     stopScreenShare,
     getShareUrl,
     unlockAudio,
+    retryConnection,
     roomId,
   };
 }

@@ -3,6 +3,11 @@
 import { useState, type ReactNode } from "react";
 import { t } from "@/lib/i18n";
 import { initialFromName } from "@/lib/colors";
+import type { ConnectionQuality, ConnectionStatus } from "@/lib/types";
+import {
+  connectionQualityLabel,
+  connectionStatusLabel,
+} from "@/components/discord/ConnectionStrip";
 import {
   ActivitiesIcon,
   CameraBadgeIcon,
@@ -24,6 +29,8 @@ interface UserPanelProps {
   userName: string;
   userColor: string;
   connected: boolean;
+  connectionStatus: ConnectionStatus;
+  connectionQuality: ConnectionQuality;
   isMuted: boolean;
   isDeafened: boolean;
   isSharing: boolean;
@@ -34,6 +41,7 @@ interface UserPanelProps {
   onStopShare: () => void;
   onDisconnect: () => void;
   onCopyLink: () => Promise<void> | void;
+  onRetryConnection: () => void;
 }
 
 function IconButton({
@@ -81,6 +89,8 @@ export function UserPanel({
   userName,
   userColor,
   connected,
+  connectionStatus,
+  connectionQuality,
   isMuted,
   isDeafened,
   isSharing,
@@ -91,6 +101,7 @@ export function UserPanel({
   onStopShare,
   onDisconnect,
   onCopyLink,
+  onRetryConnection,
 }: UserPanelProps) {
   const [copied, setCopied] = useState(false);
 
@@ -127,22 +138,44 @@ export function UserPanel({
 
       <div className="flex items-center gap-2 px-2 pb-1 pt-2">
         <SignalIcon
-          className={connected ? "text-[#23a559]" : "text-[#faa61a]"}
+          className={
+            connectionStatus === "connected"
+              ? "text-[#23a559]"
+              : connectionStatus === "failed"
+                ? "text-[#ed4245]"
+                : "text-[#faa61a]"
+          }
           width={18}
           height={18}
         />
         <div className="min-w-0 flex-1">
           <p
             className={`text-[13px] font-semibold leading-tight ${
-              connected ? "text-[#23a559]" : "text-[#faa61a]"
+              connectionStatus === "connected"
+                ? "text-[#23a559]"
+                : connectionStatus === "failed"
+                  ? "text-[#ed4245]"
+                  : "text-[#faa61a]"
             }`}
           >
-            {connected ? t.voiceConnected : t.connecting}
+            {connectionStatusLabel(connectionStatus)}
           </p>
           <p className="truncate text-[11px] leading-tight text-[#949ba4]">
-            {roomLabel} / {t.appName}
+            {connectionStatus === "connected"
+              ? `${connectionQualityLabel(connectionQuality)} · ${roomLabel}`
+              : `${roomLabel} / ${t.appName}`}
           </p>
         </div>
+        {(connectionStatus === "reconnecting" ||
+          connectionStatus === "failed") && (
+          <button
+            type="button"
+            onClick={onRetryConnection}
+            className="rounded bg-[#5865f2] px-2 py-1 text-[11px] font-semibold text-white hover:bg-[#4752c4]"
+          >
+            {t.retryConnection}
+          </button>
+        )}
         <button
           type="button"
           className="rounded p-1 text-[#dbdee1] hover:bg-[#35373c] hover:text-white"
@@ -204,7 +237,7 @@ export function UserPanel({
               isSharing ? "text-[#23a559]" : "text-[#949ba4]"
             }`}
           >
-            {isSharing ? t.sharingTheirScreen : connected ? t.inRoom : t.connecting}
+            {isSharing ? t.sharingTheirScreen : connected ? t.inRoom : connectionStatusLabel(connectionStatus)}
           </p>
         </div>
         <button

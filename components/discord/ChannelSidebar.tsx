@@ -1,6 +1,6 @@
 "use client";
 
-import type { PlayerState } from "@/lib/types";
+import type { ConnectionQuality, ConnectionStatus, PlayerState } from "@/lib/types";
 import { t } from "@/lib/i18n";
 import type { VoiceRoom } from "@/lib/rooms";
 import { UserPanel } from "@/components/discord/UserPanel";
@@ -13,6 +13,8 @@ interface ChannelSidebarProps {
   players: PlayerState[];
   myId: string | null;
   connected: boolean;
+  connectionStatus: ConnectionStatus;
+  connectionQuality: ConnectionQuality;
   isMuted: boolean;
   isDeafened: boolean;
   isSharing: boolean;
@@ -25,6 +27,7 @@ interface ChannelSidebarProps {
   onStopShare: () => void;
   onDisconnect: () => void;
   onCopyLink: () => Promise<void> | void;
+  onRetryConnection: () => void;
 }
 
 export function ChannelSidebar({
@@ -34,6 +37,8 @@ export function ChannelSidebar({
   players,
   myId,
   connected,
+  connectionStatus,
+  connectionQuality,
   isMuted,
   isDeafened,
   isSharing,
@@ -46,6 +51,7 @@ export function ChannelSidebar({
   onStopShare,
   onDisconnect,
   onCopyLink,
+  onRetryConnection,
 }: ChannelSidebarProps) {
   return (
     <aside className="flex w-60 shrink-0 flex-col bg-[#2b2d31] text-[#dbdee1]">
@@ -81,7 +87,9 @@ export function ChannelSidebar({
                     {players.map((p) => (
                       <li
                         key={p.id}
-                        className="flex items-center gap-2 rounded px-1 py-0.5 text-sm text-[#dbdee1]"
+                        className={`flex items-center gap-2 rounded px-1 py-0.5 text-sm text-[#dbdee1] ${
+                          p.disconnected ? "opacity-50" : ""
+                        }`}
                       >
                         <span
                           className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
@@ -112,6 +120,8 @@ export function ChannelSidebar({
         userName={userName}
         userColor={userColor}
         connected={connected}
+        connectionStatus={connectionStatus}
+        connectionQuality={connectionQuality}
         isMuted={isMuted}
         isDeafened={isDeafened}
         isSharing={isSharing}
@@ -122,6 +132,7 @@ export function ChannelSidebar({
         onStopShare={onStopShare}
         onDisconnect={onDisconnect}
         onCopyLink={onCopyLink}
+        onRetryConnection={onRetryConnection}
       />
     </aside>
   );
