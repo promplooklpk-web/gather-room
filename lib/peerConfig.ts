@@ -191,14 +191,13 @@ export function watchRtcIce(
 export function isMediaCallLive(call?: MediaConnection | null): boolean {
   if (!call) return false;
   const pc = call.peerConnection as RTCPeerConnection | undefined;
-  const connState = pc?.connectionState;
-  const iceState = pc?.iceConnectionState;
-  if (connState === "failed" || connState === "closed" || connState === "disconnected") {
-    return false;
-  }
-  if (iceState === "failed" || iceState === "closed" || iceState === "disconnected") {
-    return false;
-  }
+  if (!pc) return true;
+  const connState = pc.connectionState;
+  const iceState = pc.iceConnectionState;
+  // "disconnected" is a brief ICE blip — tearing down the call makes the
+  // viewer flash black. Only treat hard failures as dead.
+  if (connState === "failed" || connState === "closed") return false;
+  if (iceState === "failed" || iceState === "closed") return false;
   return true;
 }
 

@@ -100,7 +100,7 @@ function streamQualityLabel(stream: MediaStream | null): string {
   const track = stream?.getVideoTracks()[0];
   const settings = track?.getSettings();
   if (!settings?.height) return t.live;
-  return `${settings.height}p ${Math.round(settings.frameRate ?? 30)}FPS ${t.live}`;
+  return `${settings.height}p ${t.live}`;
 }
 
 export function ScreenStage({
@@ -211,15 +211,6 @@ export function ScreenStage({
 
       <div className="pointer-events-none absolute inset-x-0 bottom-20 z-10 flex items-end justify-between px-4">
         <div className="pointer-events-auto flex max-w-[80%] flex-wrap items-end gap-2">
-          {mainStream && (
-            <div className="h-[72px] w-[128px] overflow-hidden rounded-lg ring-2 ring-[#23a559]">
-              <RemoteVideo
-                stream={mainStream}
-                className="h-full w-full"
-                label={t.screenShareTitle}
-              />
-            </div>
-          )}
           <ParticipantTiles
             players={players}
             myId={myId}

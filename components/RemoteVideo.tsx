@@ -24,6 +24,10 @@ export function RemoteVideo({
   const tryPlay = useCallback(async () => {
     const video = videoRef.current;
     if (!video) return;
+    if (!video.paused && !video.ended && video.readyState >= 2) {
+      setNeedsTap(false);
+      return;
+    }
     try {
       await video.play();
       setNeedsTap(false);
@@ -38,29 +42,19 @@ export function RemoteVideo({
 
     video.setAttribute("playsinline", "true");
     video.setAttribute("webkit-playsinline", "true");
-    video.srcObject = stream;
     video.muted = muted;
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
+    }
     void tryPlay();
 
     const onCanPlay = () => void tryPlay();
     video.addEventListener("loadedmetadata", onCanPlay);
     video.addEventListener("canplay", onCanPlay);
 
-    const tracks = stream.getVideoTracks();
-    const onUnmute = () => void tryPlay();
-    tracks.forEach((track) => {
-      track.addEventListener("unmute", onUnmute);
-      track.addEventListener("ended", onUnmute);
-    });
-
     return () => {
       video.removeEventListener("loadedmetadata", onCanPlay);
       video.removeEventListener("canplay", onCanPlay);
-      tracks.forEach((track) => {
-        track.removeEventListener("unmute", onUnmute);
-        track.removeEventListener("ended", onUnmute);
-      });
-      video.srcObject = null;
     };
   }, [stream, muted, tryPlay]);
 

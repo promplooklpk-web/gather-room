@@ -123,9 +123,20 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     setPlayers((prev) => {
       const existing = prev[peerId];
       if (!existing && !patch.id) return prev;
+      const next = { ...existing, ...patch, id: peerId } as PlayerState;
+      if (
+        existing &&
+        existing.name === next.name &&
+        existing.color === next.color &&
+        existing.x === next.x &&
+        existing.y === next.y &&
+        existing.isSharingScreen === next.isSharingScreen
+      ) {
+        return prev;
+      }
       return {
         ...prev,
-        [peerId]: { ...existing, ...patch, id: peerId } as PlayerState,
+        [peerId]: next,
       };
     });
   }, []);
@@ -137,10 +148,19 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
   const attachRemoteScreen = useCallback(
     (peerId: string, stream: MediaStream) => {
-      setRemoteScreen({
-        peerId,
-        name: getRemoteName(peerId),
-        stream,
+      setRemoteScreen((prev) => {
+        const trackId = stream.getVideoTracks()[0]?.id;
+        const prevTrackId = prev?.stream.getVideoTracks()[0]?.id;
+        if (prev?.peerId === peerId && (prev.stream === stream || prevTrackId === trackId)) {
+          return prev.name === getRemoteName(peerId)
+            ? prev
+            : { ...prev, name: getRemoteName(peerId) };
+        }
+        return {
+          peerId,
+          name: getRemoteName(peerId),
+          stream,
+        };
       });
       updatePlayer(peerId, { isSharingScreen: true });
     },
@@ -244,12 +264,21 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         remotesRef.current.set(remoteId, remote);
       }
 
-      let lastNeedScreen = 0;
+      if (remote.screenCall && remote.screenCall !== call && isMediaCallLive(remote.screenCall)) {
+        try {
+          call.close();
+        } catch {
+          /* duplicate incoming screen call */
+        }
+        return;
+      }
+
+      remote.screenCall = call;
+
       const requestScreenAgain = () => {
-        const now = Date.now();
-        if (now - lastNeedScreen < 3000) return;
-        lastNeedScreen = now;
-        const conn = remotesRef.current.get(remoteId)?.conn;
+        const current = remotesRef.current.get(remoteId);
+        if (current?.screenCall && isMediaCallLive(current.screenCall)) return;
+        const conn = current?.conn;
         if (conn?.open) {
           conn.send({ type: "need-screen" } satisfies SignalingMessage);
         }
@@ -261,19 +290,20 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         attachRemoteScreen(remoteId, remoteStream);
         videoTracks.forEach((track) => {
           track.onended = () => requestScreenAgain();
-          track.onmute = () => {
-            window.setTimeout(() => {
-              if (track.muted) requestScreenAgain();
-            }, 2500);
-          };
         });
       });
 
       watchRtcIce(call.peerConnection as RTCPeerConnection | undefined, () => {
         onIceFailureRef.current("media");
       });
-      call.on("close", () => requestScreenAgain());
-      call.on("error", () => requestScreenAgain());
+      call.on("close", () => {
+        if (remote!.screenCall === call) remote!.screenCall = undefined;
+        requestScreenAgain();
+      });
+      call.on("error", () => {
+        if (remote!.screenCall === call) remote!.screenCall = undefined;
+        requestScreenAgain();
+      });
     },
     [attachRemoteScreen]
   );
@@ -319,8 +349,10 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       switch (msg.type) {
         case "hello": {
           const remote = remotesRef.current.get(msg.peer.id);
+          const firstHello = !remote || remote.info.name === "???";
           if (remote) remote.info = msg.peer;
           updatePlayer(msg.peer.id, msg.peer);
+          if (!firstHello) break;
           connectToPeerRef.current(msg.peer.id);
           if (isHostRef.current && myIdRef.current) {
             const roster = collectRoster();
@@ -356,7 +388,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           applyRemotePeers(msg.peers);
           msg.peers.forEach((p) => {
             if (p.id === myIdRef.current || !p.isSharingScreen) return;
-            const conn = remotesRef.current.get(p.id)?.conn ?? fromConn;
+            const existing = remotesRef.current.get(p.id);
+            if (isMediaCallLive(existing?.screenCall)) return;
+            const conn = existing?.conn ?? fromConn;
             if (conn?.open) {
               conn.send({ type: "need-screen" } satisfies SignalingMessage);
             }
@@ -384,7 +418,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           if (!msg.isSharing) {
             clearRemoteScreen(msg.peerId);
           } else if (msg.peerId !== myIdRef.current) {
-            const conn = remotesRef.current.get(msg.peerId)?.conn ?? fromConn;
+            const existing = remotesRef.current.get(msg.peerId);
+            if (isMediaCallLive(existing?.screenCall)) break;
+            const conn = existing?.conn ?? fromConn;
             if (conn?.open) {
               conn.send({ type: "need-screen" } satisfies SignalingMessage);
             }
@@ -393,7 +429,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         }
         case "need-screen":
           if (screenStreamRef.current && fromConn) {
-            startScreenCallToPeerRef.current(fromConn.peer, true);
+            startScreenCallToPeerRef.current(fromConn.peer, false);
           }
           break;
         case "need-relay":
@@ -1030,6 +1066,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       Object.values(players).forEach((p) => {
         if (!p.isSharingScreen || p.id === me) return;
         if (remoteScreen?.peerId === p.id) return;
+        if (isMediaCallLive(remotesRef.current.get(p.id)?.screenCall)) return;
         const conn = remotesRef.current.get(p.id)?.conn;
         if (!conn?.open) return;
         conn.send({ type: "need-screen" } satisfies SignalingMessage);
