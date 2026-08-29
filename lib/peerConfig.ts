@@ -210,6 +210,26 @@ export function isMediaCallLive(call?: MediaConnection | null): boolean {
   return true;
 }
 
+/** True if we are actually receiving a live video track from this call. */
+export function callHasLiveVideo(call?: MediaConnection | null): boolean {
+  if (!call) return false;
+  const pc = call.peerConnection as RTCPeerConnection | undefined;
+  if (!pc) return false;
+  try {
+    return pc
+      .getReceivers()
+      .some((r) => r.track?.kind === "video" && r.track.readyState === "live");
+  } catch {
+    return false;
+  }
+}
+
+export function unavailablePeerId(err: PeerError<string>): string | null {
+  if (err.type !== "peer-unavailable") return null;
+  const m = /Could not connect to peer\s+([A-Za-z0-9_-]+)/i.exec(err.message);
+  return m?.[1] ?? null;
+}
+
 /** Errors that are expected during normal join / flaky mobile networks. */
 export function isTransientPeerError(err: PeerError<string>): boolean {
   return [
