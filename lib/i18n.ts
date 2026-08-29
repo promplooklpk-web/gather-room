@@ -45,5 +45,5 @@ export const t = {
   waitingForPeople: "รอเพื่อนเข้าร่วมช่องเสียง",
   openInSafari: "เปิดลิงก์นี้ใน Safari เพื่อคุยกับเครื่องอื่นได้",
   joiningRoom: "กำลังเข้าห้อง",
-  sameLinkHint: "ใช้ลิงก์เดียวกันทุกเครื่องจะอยู่ในห้องเดียวกัน",
+  sameLinkHint: "ใช้ลิงก์เดียวกันทุกเครื่อง และเปิดใน Safari บน iPad (อย่าเปิดจาก LINE)",
 };

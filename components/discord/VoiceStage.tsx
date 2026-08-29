@@ -141,10 +141,23 @@ export function ScreenStage({
   }, []);
 
   if (!showingShare) {
+    const others = players.filter((p) => p.id !== myId);
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-28 pt-6">
-        {players.length === 0 ? (
-          <p className="text-sm text-[#949ba4]">{t.waitingForPeople}</p>
+        {players.length === 0 || others.length === 0 ? (
+          <>
+            {players.length > 0 && (
+              <div className="mb-6 flex w-full max-w-5xl justify-center">
+                <ParticipantTiles
+                  players={players}
+                  myId={myId}
+                  isMuted={isMuted}
+                  isDeafened={isDeafened}
+                />
+              </div>
+            )}
+            <p className="text-sm text-[#949ba4]">{t.waitingForPeople}</p>
+          </>
         ) : (
           <div className="flex w-full max-w-5xl justify-center">
             <ParticipantTiles

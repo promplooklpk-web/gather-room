@@ -1,9 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { t } from "@/lib/i18n";
-import { findRoom, parseRoomFromUrl } from "@/lib/rooms";
+import { DEFAULT_ROOM_ID, findRoom, parseRoomFromUrl } from "@/lib/rooms";
 import { isInAppBrowser } from "@/lib/peerConfig";
+
+function subscribeRoom() {
+  return () => {};
+}
 
 interface JoinScreenProps {
   onJoin: (name: string) => void;
@@ -12,7 +16,12 @@ interface JoinScreenProps {
 export function JoinScreen({ onJoin }: JoinScreenProps) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
-  const room = useMemo(() => findRoom(parseRoomFromUrl()), []);
+  const roomId = useSyncExternalStore(
+    subscribeRoom,
+    parseRoomFromUrl,
+    () => DEFAULT_ROOM_ID
+  );
+  const room = findRoom(roomId);
   const inApp = useMemo(() => isInAppBrowser(), []);
 
   const handleSubmit = (e: React.FormEvent) => {

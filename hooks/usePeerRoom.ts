@@ -19,7 +19,7 @@ import {
   isMediaCallLive,
   isTransientPeerError,
   makeGuestPeerId,
-  probeUdpBlocked,
+  isIosDevice,
   watchRtcIce,
 } from "@/lib/peerConfig";
 import { pickColor } from "@/lib/colors";
@@ -28,7 +28,6 @@ import type { PeerInfo, PlayerState, SignalingMessage } from "@/lib/types";
 
 const HOST_CONNECT_MAX_ATTEMPTS = 24;
 const HOST_CONNECT_INTERVAL_MS = 1500;
-const HOST_TAKEOVER_AFTER = 14;
 const RELAY_FALLBACK_AFTER = 10;
 const RELAY_RECREATE_DELAY_MS = 1000;
 
@@ -663,11 +662,12 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       }
 
       attempts += 1;
+      const takeoverAfter = isIosDevice() ? 20 : 8;
       if (attempts === RELAY_FALLBACK_AFTER && !forceRelayRef.current) {
         switchToRelayRef.current();
         return;
       }
-      if (attempts === HOST_TAKEOVER_AFTER) {
+      if (attempts === takeoverAfter) {
         tryTakeoverRef.current();
         return;
       }
@@ -864,6 +864,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
     function switchToRelayAndRejoin() {
       if (destroyed || forceRelayRef.current || switchingRelayRef.current) return;
+      // Recreating the host drops the room; only guests (or a sharer) switch.
+      if (isHostRef.current && !screenStreamRef.current) return;
       forceRelayRef.current = true;
       switchingRelayRef.current = true;
       stopHostConnectRetry();
@@ -920,12 +922,35 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       window.history.replaceState({}, "", url.toString());
     }
 
-    startMic();
-    void probeUdpBlocked().then((blocked) => {
-      if (destroyed) return;
-      if (blocked) forceRelayRef.current = true;
+    // iPad/iPhone: wait for getUserMedia (Safari ICE often needs it), then
+    // join as guest so a Mac can own the stable host id.
+    // Mac/desktop: claim host immediately so the iPad can find this room.
+    if (isIosDevice()) {
+      void getMicStream()
+        .then((stream) => {
+          if (destroyed) {
+            stream.getTracks().forEach((t) => t.stop());
+            return;
+          }
+          localStreamRef.current = stream;
+          remotesRef.current.forEach((remote) => {
+            connectToPeerRef.current(remote.info.id);
+          });
+        })
+        .catch(() => {
+          if (!destroyed) {
+            setError(
+              "ไม่สามารถใช้ไมค์ได้ — กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์ / Microphone access denied. Please allow mic permission."
+            );
+          }
+        })
+        .finally(() => {
+          if (!destroyed) openGuestPeer();
+        });
+    } else {
+      startMic();
       openHostPeer();
-    });
+    }
 
     return () => {
       destroyed = true;
@@ -959,19 +984,30 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   ]);
 
   useEffect(() => {
-    if (!enabled || !isHost) return;
+    if (!enabled || !connected) return;
     const tick = () => {
-      if (!myIdRef.current) return;
-      broadcast({
-        type: "roster",
-        peers: collectRoster(),
-        hostId: myIdRef.current,
+      const me = myPeerInfo();
+      if (!me) return;
+      remotesRef.current.forEach((remote) => {
+        if (!remote.conn?.open) return;
+        try {
+          remote.conn.send({ type: "hello", peer: me } satisfies SignalingMessage);
+        } catch {
+          /* channel may not be ready */
+        }
       });
+      if (isHostRef.current) {
+        broadcast({
+          type: "roster",
+          peers: collectRoster(),
+          hostId: me.id,
+        });
+      }
     };
     tick();
     const id = window.setInterval(tick, 2000);
     return () => window.clearInterval(id);
-  }, [enabled, isHost, broadcast, collectRoster]);
+  }, [enabled, connected, broadcast, collectRoster, myPeerInfo]);
 
   useEffect(() => {
     if (!enabled || !isSharing) return;
