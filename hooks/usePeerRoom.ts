@@ -42,6 +42,7 @@ const HOST_CONNECT_INTERVAL_MS = 700;
 const RELAY_FALLBACK_AFTER = 4;
 const RELAY_RECREATE_DELAY_MS = 1000;
 const PEER_LEAVE_GRACE_MS = 5_000;
+const STALE_PEER_MS = 8_000;
 const DATA_RECONNECT_DELAY_MS = 400;
 const STUCK_CONN_MS = 2000;
 
@@ -71,6 +72,7 @@ interface RemotePeer {
   conn?: DataConnection;
   connStartedAt?: number;
   disconnectedAt?: number;
+  lastHeardAt?: number;
   audioCall?: MediaConnection;
   screenCall?: MediaConnection;
   audioEl?: HTMLAudioElement;
@@ -434,6 +436,10 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
   const handleSignalingMessage = useCallback(
     (msg: SignalingMessage, fromConn?: DataConnection) => {
+      if (fromConn) {
+        const heard = remotesRef.current.get(fromConn.peer);
+        if (heard) heard.lastHeardAt = Date.now();
+      }
       switch (msg.type) {
         case "hello": {
           const remote = remotesRef.current.get(msg.peer.id);
@@ -598,6 +604,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
       conn.on("open", () => {
         remote.disconnectedAt = undefined;
+        remote.lastHeardAt = Date.now();
         updatePlayer(remoteId, { disconnected: false });
         if (conn.peer === roomHostIdRef.current) {
           stopHostConnectRetryRef.current();
@@ -1109,6 +1116,22 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     tryTakeoverRef.current = tryTakeoverHost;
     switchToRelayRef.current = switchToRelayAndRejoin;
 
+    function announceLeave() {
+      const me = myIdRef.current;
+      if (!me) return;
+      remotesRef.current.forEach((remote) => {
+        if (!remote.conn?.open) return;
+        try {
+          remote.conn.send({ type: "peer-left", peerId: me } satisfies SignalingMessage);
+        } catch {
+          /* already closing */
+        }
+      });
+    }
+
+    window.addEventListener("pagehide", announceLeave);
+    window.addEventListener("beforeunload", announceLeave);
+
     const url = new URL(window.location.href);
     if (url.searchParams.has("host")) {
       url.searchParams.delete("host");
@@ -1145,19 +1168,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     return () => {
       destroyed = true;
       switchingRelayRef.current = false;
+      window.removeEventListener("pagehide", announceLeave);
+      window.removeEventListener("beforeunload", announceLeave);
       if (relayTimer) clearTimeout(relayTimer);
       stopHostConnectRetry();
-      const me = myIdRef.current;
-      if (me) {
-        remotes.forEach((remote) => {
-          if (!remote.conn?.open) return;
-          try {
-            remote.conn.send({ type: "peer-left", peerId: me } satisfies SignalingMessage);
-          } catch {
-            /* already closing */
-          }
-        });
-      }
+      announceLeave();
       remotes.forEach((remote) => {
         remote.conn?.close();
         remote.audioCall?.close();
@@ -1254,6 +1269,14 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       remotesRef.current.forEach((remote) => {
         const peerId = remote.info.id;
         if (remote.conn?.open) {
+          const heard = remote.lastHeardAt ?? remote.connStartedAt ?? 0;
+          if (heard && Date.now() - heard >= STALE_PEER_MS) {
+            if (isHostRef.current) {
+              broadcast({ type: "peer-left", peerId });
+            }
+            removePlayer(peerId);
+            return;
+          }
           if (remote.disconnectedAt) {
             remote.disconnectedAt = undefined;
             updatePlayer(peerId, { disconnected: false });
