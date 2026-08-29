@@ -35,17 +35,18 @@ import type {
   SignalingMessage,
 } from "@/lib/types";
 
-const HOST_CONNECT_MAX_ATTEMPTS = 24;
-const HOST_CONNECT_INTERVAL_MS = 1500;
-const RELAY_FALLBACK_AFTER = 10;
+const HOST_CONNECT_MAX_ATTEMPTS = 36;
+const HOST_CONNECT_INTERVAL_MS = 700;
+const RELAY_FALLBACK_AFTER = 4;
 const RELAY_RECREATE_DELAY_MS = 1000;
 const PEER_LEAVE_GRACE_MS = 20_000;
 const DATA_RECONNECT_DELAY_MS = 400;
+const STUCK_CONN_MS = 2000;
 
 function isConnInFlight(conn?: DataConnection, startedAt?: number) {
   if (!conn) return false;
   if (conn.open) return true;
-  if (startedAt && Date.now() - startedAt > 6000) return false;
+  if (startedAt && Date.now() - startedAt > STUCK_CONN_MS) return false;
   const state = (conn.peerConnection as RTCPeerConnection | undefined)
     ?.connectionState;
   return !state || state === "new" || state === "connecting" || state === "connected";
@@ -377,27 +378,33 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
             remote.disconnectedAt = undefined;
           }
           updatePlayer(msg.peer.id, { ...msg.peer, disconnected: false });
-          if (!firstHello) break;
           connectToPeerRef.current(msg.peer.id);
-          if (isHostRef.current && myIdRef.current) {
+          if (fromConn?.open && myIdRef.current) {
             const roster = collectRoster();
-            fromConn?.send({
-              type: "welcome",
-              peers: roster,
-              hostId: myIdRef.current,
-            } satisfies SignalingMessage);
-            fromConn?.send({
-              type: "roster",
-              peers: roster,
-              hostId: myIdRef.current,
-            } satisfies SignalingMessage);
+            try {
+              fromConn.send({
+                type: "welcome",
+                peers: roster,
+                hostId: hostIdRef.current ?? myIdRef.current,
+              } satisfies SignalingMessage);
+              fromConn.send({
+                type: "roster",
+                peers: roster,
+                hostId: hostIdRef.current ?? myIdRef.current,
+              } satisfies SignalingMessage);
+            } catch {
+              /* channel may not be ready yet */
+            }
             if (screenStreamRef.current) {
-              fromConn?.send({
+              fromConn.send({
                 type: "screen-share",
                 peerId: myIdRef.current,
                 isSharing: true,
               } satisfies SignalingMessage);
             }
+          }
+          if (firstHello && isHostRef.current && myIdRef.current) {
+            const roster = collectRoster();
             broadcast({ type: "peer-joined", peer: msg.peer });
             broadcast({
               type: "roster",
@@ -506,13 +513,13 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         }
       };
 
-      const sendRosterIfHost = () => {
-        if (!isHostRef.current || !myIdRef.current || !conn.open) return;
+      const sendRoster = () => {
+        if (!myIdRef.current || !conn.open) return;
         try {
           conn.send({
             type: "roster",
             peers: collectRoster(),
-            hostId: myIdRef.current,
+            hostId: hostIdRef.current ?? roomHostIdRef.current,
           } satisfies SignalingMessage);
         } catch {
           /* channel may not be ready yet */
@@ -530,10 +537,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           );
         }
         sendHello();
-        sendRosterIfHost();
-        window.setTimeout(sendHello, 300);
-        window.setTimeout(sendHello, 1200);
-        window.setTimeout(sendRosterIfHost, 400);
+        sendRoster();
+        window.setTimeout(sendHello, 200);
+        window.setTimeout(sendRoster, 200);
+        window.setTimeout(sendHello, 800);
+        window.setTimeout(sendRoster, 800);
       });
 
       conn.on("data", (data) => {
@@ -561,7 +569,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       if (conn.open) {
         remote.disconnectedAt = undefined;
         sendHello();
-        sendRosterIfHost();
+        sendRoster();
       }
     },
     [handleSignalingMessage, collectRoster, myPeerInfo, updatePlayer]
@@ -606,6 +614,14 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       const remote = remotesRef.current.get(remoteId);
 
       if (!isConnInFlight(remote?.conn, remote?.connStartedAt)) {
+        if (remote?.conn && !remote.conn.open) {
+          try {
+            remote.conn.close();
+          } catch {
+            /* already closed */
+          }
+          remote.conn = undefined;
+        }
         setupDataConnection(peer.connect(remoteId, CONNECT_OPTIONS));
       }
       if (localStreamRef.current && !isMediaCallLive(remote?.audioCall) && shouldOfferAudio(myIdRef.current, remoteId)) {
@@ -753,7 +769,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       }
 
       attempts += 1;
-      const takeoverAfter = isIosDevice() ? 20 : 8;
+      const takeoverAfter = isIosDevice() ? 30 : 18;
       if (attempts === RELAY_FALLBACK_AFTER && !forceRelayRef.current) {
         switchToRelayRef.current();
         return;
@@ -1004,62 +1020,38 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     tryTakeoverRef.current = tryTakeoverHost;
     switchToRelayRef.current = switchToRelayAndRejoin;
 
-    function startMic() {
-      void getMicStream()
-        .then((stream) => {
-          if (destroyed) {
-            stream.getTracks().forEach((t) => t.stop());
-            return;
-          }
-          localStreamRef.current = stream;
-          remotesRef.current.forEach((remote) => {
-            connectToPeerRef.current(remote.info.id);
-          });
-        })
-        .catch(() => {
-          if (!destroyed) {
-            setError(
-              "ไม่สามารถใช้ไมค์ได้ — กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์ / Microphone access denied. Please allow mic permission."
-            );
-          }
-        });
-    }
-
     const url = new URL(window.location.href);
     if (url.searchParams.has("host")) {
       url.searchParams.delete("host");
       window.history.replaceState({}, "", url.toString());
     }
 
-    // iPad/iPhone: wait for getUserMedia (Safari ICE often needs it), then
-    // join as guest so a Mac can own the stable host id.
-    // Mac/desktop: claim host immediately so the iPad can find this room.
-    if (isIosDevice()) {
-      void getMicStream()
-        .then((stream) => {
-          if (destroyed) {
-            stream.getTracks().forEach((t) => t.stop());
-            return;
-          }
-          localStreamRef.current = stream;
-          remotesRef.current.forEach((remote) => {
-            connectToPeerRef.current(remote.info.id);
-          });
-        })
-        .catch(() => {
-          if (!destroyed) {
-            setError(
-              "ไม่สามารถใช้ไมค์ได้ — กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์ / Microphone access denied. Please allow mic permission."
-            );
-          }
-        })
-        .finally(() => {
-          if (!destroyed) openGuestPeer();
+    // Wait for getUserMedia before opening PeerJS — WebKit ICE for
+    // data-only connections is unreliable until the page has a live mic.
+    // iPad/iPhone then join as guest so a Mac can own the stable host id.
+    void getMicStream()
+      .then((stream) => {
+        if (destroyed) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        localStreamRef.current = stream;
+        remotesRef.current.forEach((remote) => {
+          connectToPeerRef.current(remote.info.id);
         });
-    } else {
-      startMic();
-      openHostPeer();
-    }
+      })
+      .catch(() => {
+        if (!destroyed) {
+          setError(
+            "ไม่สามารถใช้ไมค์ได้ — กรุณาอนุญาตไมโครโฟนในเบราว์เซอร์ / Microphone access denied. Please allow mic permission."
+          );
+        }
+      })
+      .finally(() => {
+        if (destroyed) return;
+        if (isIosDevice()) openGuestPeer();
+        else openHostPeer();
+      });
 
     return () => {
       destroyed = true;
@@ -1114,6 +1106,19 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           type: "roster",
           peers: collectRoster(),
           hostId: me.id,
+        });
+      } else {
+        remotesRef.current.forEach((remote) => {
+          if (!remote.conn?.open) return;
+          try {
+            remote.conn.send({
+              type: "roster",
+              peers: collectRoster(),
+              hostId: hostIdRef.current ?? roomHostIdRef.current,
+            } satisfies SignalingMessage);
+          } catch {
+            /* channel may not be ready */
+          }
         });
       }
     };

@@ -10,21 +10,28 @@ import type { ConnectionQuality } from "@/lib/types";
  * ICE servers for mesh P2P (data + media).
  *
  * PeerJS `config` *replaces* the built-in STUN list — it does not merge.
- * Corporate / Mac VPN (utun) often blocks UDP, so UDP-only TURN never
- * produces a working candidate and the room looks "dead": no chat, no
- * screen share. Always advertise TCP + TLS TURN on 80/443 as well.
+ *
+ * WebKit (Safari / iPad) waits for ICE gathering to finish before
+ * `setLocalDescription` resolves, so PeerJS cannot send the offer until
+ * every TURN allocate times out. Four TURN URLs delays join by ~8–10s
+ * even on a local LAN. Default config is STUN-only; TURN is added only
+ * when we recreate the Peer with `forceRelay` after data ICE fails.
  */
-export function iceServers(): RTCIceServer[] {
-  return [
+export function iceServers(opts?: { turn?: boolean }): RTCIceServer[] {
+  const stun: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun.cloudflare.com:3478" },
+  ];
+  if (!opts?.turn) return stun;
+  return [
+    ...stun,
     {
       urls: [
-        "turn:eu-0.turn.peerjs.com:3478",
-        "turn:eu-0.turn.peerjs.com:3478?transport=tcp",
         "turn:us-0.turn.peerjs.com:3478",
         "turn:us-0.turn.peerjs.com:3478?transport=tcp",
+        "turn:eu-0.turn.peerjs.com:3478",
+        "turn:eu-0.turn.peerjs.com:3478?transport=tcp",
       ],
       username: "peerjs",
       credential: "peerjsp",
@@ -39,7 +46,7 @@ export function getPeerOptions(forceRelay = false): PeerJSOption {
     path: "/",
     secure: true,
     config: {
-      iceServers: iceServers(),
+      iceServers: iceServers({ turn: forceRelay }),
       iceTransportPolicy: forceRelay ? "relay" : "all",
     },
   };
