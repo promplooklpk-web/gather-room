@@ -4,11 +4,18 @@ export type ConnectionQuality = "good" | "fair" | "poor" | "relay";
 export interface PlayerState {
   id: string;
   name: string;
-  x: number;
-  y: number;
   color: string;
   isSharingScreen?: boolean;
   disconnected?: boolean;
+}
+
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderColor: string;
+  text: string;
+  timestamp: number;
 }
 
 export type SignalingMessage =
@@ -17,16 +24,15 @@ export type SignalingMessage =
   | { type: "roster"; peers: PeerInfo[]; hostId: string }
   | { type: "peer-joined"; peer: PeerInfo }
   | { type: "peer-left"; peerId: string }
-  | { type: "position"; peerId: string; x: number; y: number }
   | { type: "screen-share"; peerId: string; isSharing: boolean }
   | { type: "need-screen" }
-  | { type: "need-relay" };
+  | { type: "need-relay" }
+  | { type: "chat"; message: ChatMessage }
+  | { type: "profile-update"; peerId: string; name: string; color: string };
 
 export interface PeerInfo {
   id: string;
   name: string;
   color: string;
-  x: number;
-  y: number;
   isSharingScreen?: boolean;
 }

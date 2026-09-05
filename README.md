@@ -7,7 +7,14 @@ Discord-style voice rooms with microphone and full-screen share. No accounts req
 ## Features
 
 - Five isolated voice rooms (Meeting 1–5)
-- Always-on voice chat (mute / deafen)
+- Always-on voice chat (mute / deafen) with high-fidelity speech processing
+- Active speaking indicator (glowing green ring around avatars when talking)
+- In-room text chat (Discord-style text channel with unread notification badge)
+- Web Audio sound effects (Discord-like join, leave, mute, and message notification chimes)
+- Settings modal (mic input selector, live mic test meter, display name & avatar color customization)
+- Per-user volume slider for remote participants
+- Responsive design with collapsible mobile navigation drawer
+- Profile persistence in `localStorage`
 - Screen sharing fills the main view, like Discord
 - Thai-first UI with English hints
 - Static export — deploys to GitHub Pages, no custom backend

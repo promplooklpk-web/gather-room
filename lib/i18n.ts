@@ -53,4 +53,31 @@ export const t = {
   openInSafari: "เปิดลิงก์นี้ใน Safari เพื่อคุยกับเครื่องอื่นได้",
   joiningRoom: "กำลังเข้าห้อง",
   sameLinkHint: "ใช้ลิงก์เดียวกันทุกเครื่อง และเปิดใน Safari บน iPad (อย่าเปิดจาก LINE)",
+
+  // Chat
+  chat: "แชท",
+  chatTitle: "แชทในห้อง",
+  chatPlaceholder: "พิมพ์ข้อความใน #{room}... / Message #{room}...",
+  noMessages: "ยังไม่มีข้อความ เริ่มทักทายเพื่อนๆ ได้เลย!",
+  send: "ส่ง",
+  todayAt: "วันนี้ เวลา",
+
+  // Settings & Mic Test
+  userSettings: "ตั้งค่าผู้ใช้",
+  voiceSettings: "การตั้งค่าเสียง",
+  micInput: "อุปกรณ์ไมโครโฟน (Input Device)",
+  defaultMic: "ไมโครโฟนเริ่มต้น (Default)",
+  micTest: "ทดสอบไมค์ (Mic Test)",
+  micTestHint: "ลองพูดเพื่อทดสอบว่าไมค์รับเสียงหรือไม่",
+  micTesting: "กำลังฟังเสียง...",
+  micWorking: "ไมโครโฟนทำงานปกติ!",
+  soundEffects: "เสียงเอฟเฟกต์ (Sound Cues)",
+  soundEffectsDesc: "เล่นเสียงเมื่อมีคนเข้า/ออกห้อง หรือเปิด/ปิดไมค์",
+  profileSettings: "โปรไฟล์ของฉัน",
+  displayName: "ชื่อที่แสดง",
+  avatarColor: "สีอวตาร",
+  saveChanges: "บันทึกการเปลี่ยนแปลง",
+  userVolume: "ระดับเสียงของผู้ใช้",
+  close: "ปิด",
+  esc: "ESC",
 };

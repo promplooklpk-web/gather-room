@@ -18,6 +18,9 @@ interface ParticipantTilesProps {
   compact?: boolean;
   isMuted?: boolean;
   isDeafened?: boolean;
+  speakingPeers?: Record<string, boolean>;
+  userVolumes?: Record<string, number>;
+  onSetUserVolume?: (peerId: string, volume: number) => void;
 }
 
 export function ParticipantTiles({
@@ -26,7 +29,12 @@ export function ParticipantTiles({
   compact = false,
   isMuted = false,
   isDeafened = false,
+  speakingPeers = {},
+  userVolumes = {},
+  onSetUserVolume,
 }: ParticipantTilesProps) {
+  const [activeVolumePeerId, setActiveVolumePeerId] = useState<string | null>(null);
+
   if (players.length === 0) return null;
 
   return (
@@ -36,14 +44,22 @@ export function ParticipantTiles({
       {players.map((p) => {
         const isMe = p.id === myId;
         const tileMuted = isMe && (isMuted || isDeafened);
+        const isSpeaking = Boolean(speakingPeers[p.id]);
+        const currentVolume = userVolumes[p.id] ?? 100;
+        const showVolumePopup = activeVolumePeerId === p.id && !isMe;
+
         return (
           <div
             key={p.id}
-            className={`relative overflow-hidden rounded-lg bg-[#1e1f22] ring-1 ring-black/40 ${
+            className={`relative overflow-hidden rounded-lg bg-[#1e1f22] transition-all duration-150 ${
+              isSpeaking
+                ? "ring-2 ring-[#23a559] shadow-[0_0_12px_rgba(35,165,89,0.45)]"
+                : "ring-1 ring-black/40"
+            } ${
               p.disconnected ? "opacity-50" : ""
             } ${
               compact
-                ? "h-[72px] w-[128px]"
+                ? "h-[76px] w-[132px]"
                 : players.length === 1
                   ? "aspect-video w-[min(100%,760px)] min-h-[280px]"
                   : "aspect-video min-h-[180px] min-w-[240px] flex-1 basis-[280px] max-w-[520px]"
@@ -51,7 +67,9 @@ export function ParticipantTiles({
           >
             <div className="flex h-full w-full flex-col items-center justify-center gap-2">
               <div
-                className={`flex items-center justify-center rounded-full font-bold text-white ${
+                className={`flex items-center justify-center rounded-full font-bold text-white transition-all duration-150 ${
+                  isSpeaking ? "ring-4 ring-[#23a559]" : ""
+                } ${
                   compact
                     ? "h-10 w-10 text-base"
                     : players.length === 1
@@ -63,21 +81,62 @@ export function ParticipantTiles({
                 {initialFromName(p.name)}
               </div>
             </div>
-            <div className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-black/55 px-2 py-1">
-              {tileMuted && (
-                <span className="text-[#ed4245]">
-                  <MicOffIcon width={12} height={12} />
+
+            {/* Bottom metadata strip */}
+            <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/60 px-2 py-1">
+              <div className="flex min-w-0 items-center gap-1.5">
+                {tileMuted && (
+                  <span className="text-[#ed4245]">
+                    <MicOffIcon width={12} height={12} />
+                  </span>
+                )}
+                {p.isSharingScreen && (
+                  <span className="text-[#23a559]">
+                    <ScreenShareIcon width={12} height={12} />
+                  </span>
+                )}
+                <span className="truncate text-[11px] font-medium text-white">
+                  {p.name}
+                  {isMe ? ` ${t.you}` : ""}
                 </span>
+              </div>
+
+              {/* Volume button for remote peers */}
+              {!isMe && onSetUserVolume && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveVolumePeerId(showVolumePopup ? null : p.id)
+                    }
+                    className="flex h-5 w-5 items-center justify-center rounded text-[#949ba4] hover:bg-white/10 hover:text-white"
+                    title={t.userVolume}
+                    aria-label={t.userVolume}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" />
+                    </svg>
+                  </button>
+
+                  {/* Volume Slider Popover */}
+                  {showVolumePopup && (
+                    <div className="absolute bottom-6 right-0 z-30 flex w-36 flex-col gap-1.5 rounded-lg border border-[#1f2023] bg-[#2b2d31] p-2.5 shadow-xl">
+                      <div className="flex items-center justify-between text-[10px] text-[#dbdee1]">
+                        <span>{t.userVolume}</span>
+                        <span className="font-semibold text-white">{currentVolume}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={currentVolume}
+                        onChange={(e) => onSetUserVolume(p.id, Number(e.target.value))}
+                        className="h-1.5 w-full cursor-pointer accent-[#5865f2]"
+                      />
+                    </div>
+                  )}
+                </div>
               )}
-              {p.isSharingScreen && (
-                <span className="text-[#23a559]">
-                  <ScreenShareIcon width={12} height={12} />
-                </span>
-              )}
-              <span className="truncate text-[11px] text-white">
-                {p.name}
-                {isMe ? ` ${t.you}` : ""}
-              </span>
             </div>
           </div>
         );
@@ -96,6 +155,9 @@ interface ScreenStageProps {
   isMuted: boolean;
   isDeafened: boolean;
   someoneSharing: boolean;
+  speakingPeers?: Record<string, boolean>;
+  userVolumes?: Record<string, number>;
+  onSetUserVolume?: (peerId: string, volume: number) => void;
 }
 
 function streamQualityLabel(stream: MediaStream | null): string {
@@ -115,6 +177,9 @@ export function ScreenStage({
   isMuted,
   isDeafened,
   someoneSharing,
+  speakingPeers = {},
+  userVolumes = {},
+  onSetUserVolume,
 }: ScreenStageProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -155,6 +220,9 @@ export function ScreenStage({
                   myId={myId}
                   isMuted={isMuted}
                   isDeafened={isDeafened}
+                  speakingPeers={speakingPeers}
+                  userVolumes={userVolumes}
+                  onSetUserVolume={onSetUserVolume}
                 />
               </div>
             )}
@@ -167,6 +235,9 @@ export function ScreenStage({
               myId={myId}
               isMuted={isMuted}
               isDeafened={isDeafened}
+              speakingPeers={speakingPeers}
+              userVolumes={userVolumes}
+              onSetUserVolume={onSetUserVolume}
             />
           </div>
         )}
@@ -219,6 +290,9 @@ export function ScreenStage({
             compact
             isMuted={isMuted}
             isDeafened={isDeafened}
+            speakingPeers={speakingPeers}
+            userVolumes={userVolumes}
+            onSetUserVolume={onSetUserVolume}
           />
         </div>
         <button

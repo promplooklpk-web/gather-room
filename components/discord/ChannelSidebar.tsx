@@ -20,6 +20,7 @@ interface ChannelSidebarProps {
   isSharing: boolean;
   userName: string;
   userColor: string;
+  speakingPeers?: Record<string, boolean>;
   onSelectRoom: (roomId: string) => void;
   onToggleMute: () => void;
   onToggleDeafen: () => void;
@@ -28,6 +29,7 @@ interface ChannelSidebarProps {
   onDisconnect: () => void;
   onCopyLink: () => Promise<void> | void;
   onRetryConnection: () => void;
+  onOpenSettings?: () => void;
 }
 
 export function ChannelSidebar({
@@ -44,6 +46,7 @@ export function ChannelSidebar({
   isSharing,
   userName,
   userColor,
+  speakingPeers = {},
   onSelectRoom,
   onToggleMute,
   onToggleDeafen,
@@ -52,10 +55,11 @@ export function ChannelSidebar({
   onDisconnect,
   onCopyLink,
   onRetryConnection,
+  onOpenSettings,
 }: ChannelSidebarProps) {
   return (
-    <aside className="flex w-60 shrink-0 flex-col bg-[#2b2d31] text-[#dbdee1]">
-      <header className="flex h-12 items-center border-b border-[#1f2023] px-4 shadow-sm">
+    <aside className="flex h-full w-60 shrink-0 flex-col bg-[#2b2d31] text-[#dbdee1]">
+      <header className="flex h-12 shrink-0 items-center border-b border-[#1f2023] px-4 shadow-sm">
         <h1 className="truncate text-[15px] font-semibold text-white">{t.appName}</h1>
       </header>
 
@@ -84,30 +88,37 @@ export function ChannelSidebar({
                 </button>
                 {active && (
                   <ul className="ml-6 mt-0.5 space-y-0.5">
-                    {players.map((p) => (
-                      <li
-                        key={p.id}
-                        className={`flex items-center gap-2 rounded px-1 py-0.5 text-sm text-[#dbdee1] ${
-                          p.disconnected ? "opacity-50" : ""
-                        }`}
-                      >
-                        <span
-                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
-                          style={{ backgroundColor: p.color }}
+                    {players.map((p) => {
+                      const isSpeaking = Boolean(speakingPeers[p.id]);
+                      return (
+                        <li
+                          key={p.id}
+                          className={`flex items-center gap-2 rounded px-1 py-0.5 text-sm text-[#dbdee1] ${
+                            p.disconnected ? "opacity-50" : ""
+                          }`}
                         >
-                          {initialFromName(p.name)}
-                        </span>
-                        <span className="min-w-0 flex-1 truncate">
-                          {p.name}
-                          {p.id === myId ? ` ${t.you}` : ""}
-                        </span>
-                        {p.isSharingScreen && (
-                          <span className="rounded bg-[#ed4245] px-1 py-px text-[9px] font-bold tracking-wide text-white">
-                            {t.live}
+                          <span
+                            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white transition-all duration-150 ${
+                              isSpeaking
+                                ? "ring-2 ring-[#23a559] ring-offset-1 ring-offset-[#2b2d31]"
+                                : ""
+                            }`}
+                            style={{ backgroundColor: p.color }}
+                          >
+                            {initialFromName(p.name)}
                           </span>
-                        )}
-                      </li>
-                    ))}
+                          <span className="min-w-0 flex-1 truncate">
+                            {p.name}
+                            {p.id === myId ? ` ${t.you}` : ""}
+                          </span>
+                          {p.isSharingScreen && (
+                            <span className="rounded bg-[#ed4245] px-1 py-px text-[9px] font-bold tracking-wide text-white">
+                              {t.live}
+                            </span>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </li>
@@ -133,6 +144,7 @@ export function ChannelSidebar({
         onDisconnect={onDisconnect}
         onCopyLink={onCopyLink}
         onRetryConnection={onRetryConnection}
+        onOpenSettings={onOpenSettings}
       />
     </aside>
   );

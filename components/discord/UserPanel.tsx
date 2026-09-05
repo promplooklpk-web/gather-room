@@ -42,6 +42,7 @@ interface UserPanelProps {
   onDisconnect: () => void;
   onCopyLink: () => Promise<void> | void;
   onRetryConnection: () => void;
+  onOpenSettings?: () => void;
 }
 
 function IconButton({
@@ -102,6 +103,7 @@ export function UserPanel({
   onDisconnect,
   onCopyLink,
   onRetryConnection,
+  onOpenSettings,
 }: UserPanelProps) {
   const [copied, setCopied] = useState(false);
 
@@ -118,12 +120,17 @@ export function UserPanel({
           <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[#23a559] text-sm font-bold text-white">
             S
             <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-sm bg-[#111214] text-white">
-              <CameraBadgeIcon />
+              <CameraBadgeIcon width={10} height={10} />
             </span>
           </div>
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-white">
-            {t.screenOne}
-          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-semibold text-white">
+              {t.screenOne}
+            </p>
+            <p className="truncate text-[11px] text-[#949ba4]">
+              {userName}
+            </p>
+          </div>
           <button
             type="button"
             onClick={onStopShare}
@@ -178,24 +185,25 @@ export function UserPanel({
         )}
         <button
           type="button"
+          onClick={() => void handleCopy()}
           className="rounded p-1 text-[#dbdee1] hover:bg-[#35373c] hover:text-white"
-          title={t.connectedTo}
-          aria-label={t.connectedTo}
+          title={copied ? t.copied : t.copyLink}
+          aria-label={copied ? t.copied : t.copyLink}
         >
           <WaveformIcon width={16} height={16} />
         </button>
         <button
           type="button"
           onClick={onDisconnect}
-          className="rounded p-1 text-[#dbdee1] hover:bg-[#ed4245] hover:text-white"
+          className="rounded p-1 text-[#dbdee1] hover:bg-[#35373c] hover:text-[#ed4245]"
           title={t.disconnect}
           aria-label={t.disconnect}
         >
-          <PhoneDisconnectIcon />
+          <PhoneDisconnectIcon width={16} height={16} />
         </button>
       </div>
 
-      <div className="grid grid-cols-4 gap-1 px-2 py-2">
+      <div className="flex items-center gap-1.5 px-2 pb-2 pt-1">
         <IconButton label={t.cameraOff} disabled>
           <CameraOffIcon width={18} height={18} />
         </IconButton>
@@ -221,7 +229,7 @@ export function UserPanel({
       <div className="flex items-center gap-1 bg-[#232428] px-2 py-1.5">
         <div className="relative mr-1 shrink-0">
           <div
-            className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm"
             style={{ backgroundColor: userColor }}
           >
             {initialFromName(userName)}
@@ -276,10 +284,13 @@ export function UserPanel({
         </button>
         <button
           type="button"
-          onClick={() => void handleCopy()}
+          onClick={() => {
+            if (onOpenSettings) onOpenSettings();
+            else void handleCopy();
+          }}
           className="rounded p-1.5 text-[#dbdee1] hover:bg-[#35373c] hover:text-white"
-          title={copied ? t.copied : t.copyLink}
-          aria-label={copied ? t.copied : t.settings}
+          title={t.settings}
+          aria-label={t.settings}
         >
           <GearIcon width={18} height={18} />
         </button>
