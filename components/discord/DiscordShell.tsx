@@ -13,6 +13,7 @@ import { t } from "@/lib/i18n";
 import { setRemoteAudioDeafened } from "@/lib/audio";
 import {
   VOICE_ROOMS,
+  ensureRoomSession,
   findRoom,
   parseRoomFromUrl,
   setRoomInUrl,
@@ -316,7 +317,7 @@ function VoiceRoomSession({
 export function DiscordShell({ userName, onLogout }: DiscordShellProps) {
   const [activeRoomId, setActiveRoomId] = useState(() => {
     const id = parseRoomFromUrl();
-    if (typeof window !== "undefined") setRoomInUrl(id);
+    if (typeof window !== "undefined") ensureRoomSession(id);
     return id;
   });
 
