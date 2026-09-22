@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlayerState } from "@/lib/types";
 import { RemoteVideo } from "@/components/RemoteVideo";
 import { t } from "@/lib/i18n";
+import { mediaStreamIsDisplayable } from "@/lib/peerConfig";
 import { initialFromName } from "@/lib/colors";
 import {
   ExitFullscreenIcon,
@@ -176,7 +177,7 @@ export function ScreenStage({
   isSharing,
   isMuted,
   isDeafened,
-  someoneSharing,
+  someoneSharing: _someoneSharing,
   speakingPeers = {},
   userVolumes = {},
   onSetUserVolume,
@@ -184,12 +185,17 @@ export function ScreenStage({
   const stageRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const mainStream = remoteScreen?.stream ?? localScreen ?? null;
+  const pickDisplayable = (stream: MediaStream | null) =>
+    stream && mediaStreamIsDisplayable(stream) ? stream : null;
+  const mainStream =
+    pickDisplayable(remoteScreen?.stream ?? null) ??
+    pickDisplayable(localScreen) ??
+    null;
   const sharerName =
     remoteScreen?.name ??
     (isSharing ? players.find((p) => p.id === myId)?.name : undefined);
   const quality = streamQualityLabel(mainStream);
-  const showingShare = Boolean(mainStream || isSharing || someoneSharing);
+  const showingShare = Boolean(mainStream || isSharing);
 
   const toggleFullscreen = useCallback(async () => {
     const node = stageRef.current;

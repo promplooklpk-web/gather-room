@@ -56,6 +56,15 @@ async function fetchActivePeers(
   return peers;
 }
 
+/** Push sharing flag to Postgres immediately (do not wait for heartbeat). */
+export function flushVoicePresence(
+  roomId: string,
+  session: string,
+  self: VoicePresencePayload
+): void {
+  void upsertSelf(roomId, session, self);
+}
+
 async function upsertSelf(
   roomId: string,
   session: string,

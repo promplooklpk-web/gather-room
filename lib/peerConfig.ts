@@ -224,6 +224,35 @@ export function callHasLiveVideo(call?: MediaConnection | null): boolean {
   }
 }
 
+/** Remote screen is only displayable while the stream is active and video is unmuted/live. */
+export function mediaStreamIsDisplayable(
+  stream: MediaStream | null | undefined
+): boolean {
+  if (!stream?.active) return false;
+  const tracks = stream.getVideoTracks();
+  if (tracks.length === 0) return false;
+  return tracks.some(
+    (t) => t.readyState === "live" && !t.muted
+  );
+}
+
+/** Like callHasLiveVideo but ignores muted/ended tracks (black frame while PC stays up). */
+export function callHasDisplayableVideo(call?: MediaConnection | null): boolean {
+  if (!call) return false;
+  const pc = call.peerConnection as RTCPeerConnection | undefined;
+  if (!pc) return false;
+  try {
+    return pc.getReceivers().some(
+      (r) =>
+        r.track?.kind === "video" &&
+        r.track.readyState === "live" &&
+        !r.track.muted
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function unavailablePeerId(err: PeerError<string>): string | null {
   if (err.type !== "peer-unavailable") return null;
   const m = /Could not connect to peer\s+([A-Za-z0-9_-]+)/i.exec(err.message);
