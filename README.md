@@ -2,7 +2,7 @@
 
 Discord-style voice rooms with microphone and full-screen share. No accounts required.
 
-**Live:** `https://gather-room.<your-workers-subdomain>.workers.dev/` after CI deploy (see Deploy below)
+**Live:** `https://gather-room.<your-workers-subdomain>.workers.dev/` once GitHub Actions secrets are set and deploy succeeds (see Deploy below).
 
 ## Features
 
