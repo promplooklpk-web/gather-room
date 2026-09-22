@@ -1,6 +1,6 @@
 "use client";
 
-import type { ConnectionQuality, ConnectionStatus, PlayerState } from "@/lib/types";
+import type { ConnectionQuality, ConnectionStatus, PlayerState, PresenceSyncStatus } from "@/lib/types";
 import { t } from "@/lib/i18n";
 import type { RoomOccupancyMap } from "@/lib/allRoomsPresence";
 import type { VoiceRoom } from "@/lib/rooms";
@@ -17,6 +17,8 @@ interface ChannelSidebarProps {
   connected: boolean;
   connectionStatus: ConnectionStatus;
   connectionQuality: ConnectionQuality;
+  presenceSyncStatus?: PresenceSyncStatus;
+  connectingStuck?: boolean;
   isMuted: boolean;
   isDeafened: boolean;
   isSharing: boolean;
@@ -88,6 +90,8 @@ export function ChannelSidebar({
   connected,
   connectionStatus,
   connectionQuality,
+  presenceSyncStatus = "idle",
+  connectingStuck = false,
   isMuted,
   isDeafened,
   isSharing,
@@ -168,6 +172,8 @@ export function ChannelSidebar({
         connected={connected}
         connectionStatus={connectionStatus}
         connectionQuality={connectionQuality}
+        presenceSyncStatus={presenceSyncStatus}
+        connectingStuck={connectingStuck}
         isMuted={isMuted}
         isDeafened={isDeafened}
         isSharing={isSharing}

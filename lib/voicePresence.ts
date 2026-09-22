@@ -1,7 +1,7 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { getPeerRealm } from "@/lib/rooms";
 import { getSupabaseClient } from "@/lib/supabaseClient";
-import type { PeerInfo } from "@/lib/types";
+import type { PeerInfo, PresenceSyncStatus } from "@/lib/types";
 
 const LOG_PREFIX = "[voice-peers]";
 const HEARTBEAT_MS = 3000;
@@ -111,7 +111,8 @@ export function startVoicePresence(
   roomId: string,
   session: string,
   getSelf: () => VoicePresencePayload | null,
-  onSync: VoicePresenceSyncHandler
+  onSync: VoicePresenceSyncHandler,
+  onChannelStatus?: (status: PresenceSyncStatus) => void
 ): VoicePresenceSession | null {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
@@ -166,10 +167,13 @@ export function startVoicePresence(
       }
     );
 
+  onChannelStatus?.("connecting");
+
   void channel.subscribe(async (status) => {
     console.info(LOG_PREFIX, "channel", status);
     if (stopped || !channel) return;
     if (status === "SUBSCRIBED") {
+      onChannelStatus?.("connected");
       const latest = getSelf();
       if (!latest) return;
       await upsertSelf(roomId, session, latest);
@@ -178,6 +182,11 @@ export function startVoicePresence(
     }
     if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
       console.error(LOG_PREFIX, "channel failed", status);
+      onChannelStatus?.("error");
+      return;
+    }
+    if (status === "CLOSED") {
+      onChannelStatus?.("idle");
     }
   });
 

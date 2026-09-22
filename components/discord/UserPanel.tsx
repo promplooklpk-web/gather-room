@@ -3,11 +3,14 @@
 import { useState, type ReactNode } from "react";
 import { t } from "@/lib/i18n";
 import { initialFromName } from "@/lib/colors";
-import type { ConnectionQuality, ConnectionStatus } from "@/lib/types";
+import type { ConnectionQuality, ConnectionStatus, PresenceSyncStatus } from "@/lib/types";
 import {
+  connectionHeadline,
   connectionQualityLabel,
   connectionStatusLabel,
-} from "@/components/discord/ConnectionStrip";
+  connectionStatusTone,
+  shouldOfferReconnect,
+} from "@/components/discord/connectionStatusUi";
 import {
   ActivitiesIcon,
   CameraBadgeIcon,
@@ -31,6 +34,8 @@ interface UserPanelProps {
   connected: boolean;
   connectionStatus: ConnectionStatus;
   connectionQuality: ConnectionQuality;
+  presenceSyncStatus?: PresenceSyncStatus;
+  connectingStuck?: boolean;
   isMuted: boolean;
   isDeafened: boolean;
   isSharing: boolean;
@@ -92,6 +97,8 @@ export function UserPanel({
   connected,
   connectionStatus,
   connectionQuality,
+  presenceSyncStatus = "idle",
+  connectingStuck = false,
   isMuted,
   isDeafened,
   isSharing,
@@ -112,6 +119,10 @@ export function UserPanel({
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   };
+
+  const tone = connectionStatusTone(connectionStatus);
+  const showReconnect = shouldOfferReconnect(connectionStatus, connectingStuck);
+  const statusLine = connectionHeadline(connectionStatus, presenceSyncStatus);
 
   return (
     <div className="border-t border-[#1f2023] bg-[#232428]">
@@ -146,9 +157,9 @@ export function UserPanel({
       <div className="flex items-center gap-2 px-2 pb-1 pt-2">
         <SignalIcon
           className={
-            connectionStatus === "connected"
+            tone === "ok"
               ? "text-[#23a559]"
-              : connectionStatus === "failed"
+              : tone === "bad"
                 ? "text-[#ed4245]"
                 : "text-[#faa61a]"
           }
@@ -158,29 +169,30 @@ export function UserPanel({
         <div className="min-w-0 flex-1">
           <p
             className={`text-[13px] font-semibold leading-tight ${
-              connectionStatus === "connected"
+              tone === "ok"
                 ? "text-[#23a559]"
-                : connectionStatus === "failed"
+                : tone === "bad"
                   ? "text-[#ed4245]"
                   : "text-[#faa61a]"
             }`}
           >
-            {connectionStatusLabel(connectionStatus)}
+            {statusLine}
           </p>
           <p className="truncate text-[11px] leading-tight text-[#949ba4]">
             {connectionStatus === "connected"
               ? `${connectionQualityLabel(connectionQuality)} · ${roomLabel}`
-              : `${roomLabel} / ${t.appName}`}
+              : connectingStuck
+                ? t.stuckConnectingHint
+                : `${roomLabel} / ${t.appName}`}
           </p>
         </div>
-        {(connectionStatus === "reconnecting" ||
-          connectionStatus === "failed") && (
+        {showReconnect && (
           <button
             type="button"
             onClick={onRetryConnection}
             className="rounded bg-[#5865f2] px-2 py-1 text-[11px] font-semibold text-white hover:bg-[#4752c4]"
           >
-            {t.retryConnection}
+            {t.reconnectNow}
           </button>
         )}
         <button
