@@ -374,11 +374,23 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
       const requestScreenAgain = () => {
         const current = remotesRef.current.get(remoteId);
-        if (current?.screenCall && isMediaCallLive(current.screenCall)) return;
-        const conn = current?.conn;
+        if (!current?.info.isSharingScreen) return;
+        if (current.screenCall && callHasLiveVideo(current.screenCall)) return;
+        const conn = current.conn;
         if (conn?.open) {
           conn.send({ type: "need-screen" } satisfies SignalingMessage);
         }
+      };
+
+      const onScreenCallLost = () => {
+        if (remote!.screenCall === call) remote!.screenCall = undefined;
+        const current = remotesRef.current.get(remoteId);
+        if (!current?.info.isSharingScreen) {
+          clearRemoteScreen(remoteId);
+          return;
+        }
+        clearRemoteScreen(remoteId);
+        requestScreenAgain();
       };
 
       call.on("stream", (remoteStream) => {
@@ -386,23 +398,20 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         if (videoTracks.length === 0) return;
         attachRemoteScreen(remoteId, remoteStream);
         videoTracks.forEach((track) => {
-          track.onended = () => requestScreenAgain();
+          track.onended = () => {
+            clearRemoteScreen(remoteId);
+            requestScreenAgain();
+          };
         });
       });
 
       watchRtcIce(call.peerConnection as RTCPeerConnection | undefined, () => {
         onIceFailureRef.current("media");
       });
-      call.on("close", () => {
-        if (remote!.screenCall === call) remote!.screenCall = undefined;
-        requestScreenAgain();
-      });
-      call.on("error", () => {
-        if (remote!.screenCall === call) remote!.screenCall = undefined;
-        requestScreenAgain();
-      });
+      call.on("close", onScreenCallLost);
+      call.on("error", onScreenCallLost);
     },
-    [attachRemoteScreen]
+    [attachRemoteScreen, clearRemoteScreen]
   );
 
   const myPeerInfo = useCallback((): PeerInfo | null => {
@@ -441,6 +450,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           existing.info = { ...existing.info, ...p };
         }
         updatePlayer(p.id, { ...p, disconnected: false });
+        if (!p.isSharingScreen) {
+          clearRemoteScreen(p.id);
+        }
         connectToPeerRef.current(p.id);
       });
 
@@ -452,7 +464,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         });
       }
     },
-    [updatePlayer, removePlayer]
+    [updatePlayer, removePlayer, clearRemoteScreen]
   );
 
   const requestScreenFrom = useCallback((peerId: string) => {
@@ -487,6 +499,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
             remote.disconnectedAt = undefined;
           }
           updatePlayer(msg.peer.id, { ...msg.peer, disconnected: false });
+          if (!msg.peer.isSharingScreen) {
+            clearRemoteScreen(msg.peer.id);
+          }
           connectToPeerRef.current(msg.peer.id);
           if (screenStreamRef.current && (firstHello || wasDisconnected)) {
             startScreenCallToPeerRef.current(msg.peer.id, true);
@@ -576,6 +591,12 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           updatePlayer(msg.peerId, { isSharingScreen: msg.isSharing });
           if (!msg.isSharing) {
             clearRemoteScreen(msg.peerId);
+            try {
+              remote?.screenCall?.close();
+            } catch {
+              /* already closed */
+            }
+            if (remote) remote.screenCall = undefined;
           } else if (msg.peerId !== myIdRef.current) {
             requestScreenFrom(msg.peerId);
           }
@@ -1496,9 +1517,19 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       const me = myIdRef.current;
       if (!me) return;
       Object.values(players).forEach((p) => {
-        if (!p.isSharingScreen || p.id === me) return;
-        if (remoteScreen?.peerId === p.id && callHasLiveVideo(remotesRef.current.get(p.id)?.screenCall)) {
+        if (p.id === me) return;
+        if (!p.isSharingScreen) {
+          if (remoteScreen?.peerId === p.id) {
+            clearRemoteScreen(p.id);
+          }
           return;
+        }
+        const screenCall = remotesRef.current.get(p.id)?.screenCall;
+        if (remoteScreen?.peerId === p.id && callHasLiveVideo(screenCall)) {
+          return;
+        }
+        if (remoteScreen?.peerId === p.id && !callHasLiveVideo(screenCall)) {
+          clearRemoteScreen(p.id);
         }
         const conn = remotesRef.current.get(p.id)?.conn;
         if (!conn?.open) {
@@ -1509,7 +1540,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       });
     }, 2000);
     return () => window.clearInterval(id);
-  }, [enabled, connected, players, remoteScreen]);
+  }, [enabled, connected, players, remoteScreen, clearRemoteScreen]);
 
   useEffect(() => {
     if (!enabled || !connected) return;
