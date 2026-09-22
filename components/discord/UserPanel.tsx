@@ -33,6 +33,7 @@ interface UserPanelProps {
   userColor: string;
   connected: boolean;
   connectionStatus: ConnectionStatus;
+  connectionStatusRaw?: ConnectionStatus;
   connectionQuality: ConnectionQuality;
   presenceSyncStatus?: PresenceSyncStatus;
   connectingStuck?: boolean;
@@ -96,6 +97,7 @@ export function UserPanel({
   userColor,
   connected,
   connectionStatus,
+  connectionStatusRaw,
   connectionQuality,
   presenceSyncStatus = "idle",
   connectingStuck = false,
@@ -121,7 +123,9 @@ export function UserPanel({
   };
 
   const tone = connectionStatusTone(connectionStatus);
-  const showReconnect = shouldOfferReconnect(connectionStatus, connectingStuck);
+  const showReconnect = shouldOfferReconnect(
+    connectionStatusRaw ?? connectionStatus
+  );
   const statusLine = connectionHeadline(connectionStatus, presenceSyncStatus);
 
   return (

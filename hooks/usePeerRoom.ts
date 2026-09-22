@@ -751,7 +751,10 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         remote.disconnectedAt = undefined;
         remote.lastHeardAt = Date.now();
         updatePlayer(remoteId, { disconnected: false });
-        if (!isHostRef.current && conn.peer === roomHostIdRef.current) {
+        if (
+          !isHostRef.current &&
+          (conn.peer === roomHostIdRef.current || presenceModeRef.current)
+        ) {
           markGuestConnectedRef.current();
         } else if (isHostRef.current && conn.peer === roomHostIdRef.current) {
           stopHostConnectRetryRef.current();
@@ -1218,7 +1221,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       });
 
       peer.on("close", () => {
-        if (destroyed) return;
+        if (destroyed || switchingRelayRef.current) return;
         setRawConnectionStatus("disconnected");
       });
 
@@ -1486,10 +1489,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         (peers) => {
           if (destroyed) return;
           applyRemotePeers(peers, false);
-          setRawConnectionStatus("connected");
-          setError((prev) =>
-            prev?.startsWith("เชื่อมต่อไม่สำเร็จ") ? null : prev
-          );
+          // Roster sync must not mask PeerJS reconnect/disconnected state.
         },
         (channelStatus) => {
           if (destroyed) return;
@@ -1514,6 +1514,25 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
     window.addEventListener("pagehide", announceLeave);
     window.addEventListener("beforeunload", announceLeave);
+
+    const onBrowserOffline = () => {
+      if (destroyed) return;
+      setRawConnectionStatus((prev) =>
+        prev === "failed" ? prev : "reconnecting"
+      );
+    };
+    const onBrowserOnline = () => {
+      if (destroyed) return;
+      const peer = peerRef.current;
+      if (!peer?.id) return;
+      try {
+        peer.reconnect();
+      } catch {
+        /* already destroyed or reconnecting */
+      }
+    };
+    window.addEventListener("offline", onBrowserOffline);
+    window.addEventListener("online", onBrowserOnline);
 
     const url = new URL(window.location.href);
     if (url.searchParams.has("host")) {
@@ -1566,6 +1585,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       switchingRelayRef.current = false;
       window.removeEventListener("pagehide", announceLeave);
       window.removeEventListener("beforeunload", announceLeave);
+      window.removeEventListener("offline", onBrowserOffline);
+      window.removeEventListener("online", onBrowserOnline);
       if (relayTimer) clearTimeout(relayTimer);
       stopVoicePresenceRef.current();
       stopHostConnectRetry();
@@ -1941,6 +1962,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     ),
     connected,
     connectionStatus,
+    connectionStatusRaw: rawConnectionStatus,
     connectionQuality,
     presenceSyncStatus,
     connectingStuck,

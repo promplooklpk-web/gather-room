@@ -33,23 +33,19 @@ export function connectionHeadline(
   return hint ? `${voice} · ${hint}` : voice;
 }
 
-export function shouldOfferReconnect(
-  status: ConnectionStatus,
-  connectingStuck: boolean
-): boolean {
-  if (status === "failed" || status === "disconnected") return true;
-  if (status === "reconnecting") return true;
-  if (status === "connecting" && connectingStuck) return true;
-  return false;
+/** Reconnect whenever voice is not fully up (stuck hint is separate). */
+export function shouldOfferReconnect(status: ConnectionStatus): boolean {
+  return status !== "connected";
 }
 
 /** Full-width banner below header (reserves layout space, avoids overlapping stage). */
 export function shouldShowConnectionBanner(
   status: ConnectionStatus,
   presence: PresenceSyncStatus,
-  connectingStuck: boolean
+  connectingStuck: boolean,
+  rawStatus?: ConnectionStatus
 ): boolean {
-  if (status !== "connected") return true;
+  if (shouldOfferReconnect(rawStatus ?? status)) return true;
   if (presence !== "idle") return true;
   if (connectingStuck) return true;
   return false;
