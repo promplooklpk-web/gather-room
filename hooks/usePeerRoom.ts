@@ -49,6 +49,9 @@ import type {
 
 const HOST_CONNECT_MAX_ATTEMPTS = 36;
 const HOST_CONNECT_INTERVAL_MS = 700;
+const HOST_TAKEOVER_RETRY_AFTER = 3;
+const HOST_TAKEOVER_PROBE_MS = 3500;
+const HOST_PEER_UNAVAILABLE_TAKEOVER = 2;
 const RELAY_FALLBACK_AFTER = 4;
 const RELAY_RECREATE_DELAY_MS = 1000;
 const PEER_LEAVE_GRACE_MS = 5_000;
@@ -148,6 +151,12 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   const onIceFailureRef = useRef<(kind: "data" | "media") => void>(() => {});
   const removePlayerRef = useRef<(peerId: string) => void>(() => {});
   const hostConnectTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hostTakeoverTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hostMissCountRef = useRef(0);
+  const takeoverInFlightRef = useRef(false);
+  const markGuestConnectedRef = useRef<() => void>(() => {});
+  const startHostTakeoverProbeRef = useRef<() => void>(() => {});
+  const stopHostTakeoverProbeRef = useRef<() => void>(() => {});
   const forceRelayRef = useRef(false);
   const switchingRelayRef = useRef(false);
 
@@ -398,11 +407,16 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   }, []);
 
   const collectRoster = useCallback((): PeerInfo[] => {
-    const peers: PeerInfo[] = Array.from(remotesRef.current.values())
-      .filter((r) => r.info.name !== "???" && !r.disconnectedAt)
-      .map((r) => r.info);
+    const seen = new Set<string>();
+    const peers: PeerInfo[] = [];
+    for (const remote of remotesRef.current.values()) {
+      if (remote.info.name === "???" || remote.disconnectedAt) continue;
+      if (remote.info.id === myIdRef.current || seen.has(remote.info.id)) continue;
+      seen.add(remote.info.id);
+      peers.push(remote.info);
+    }
     const me = myPeerInfo();
-    if (me) peers.push(me);
+    if (me && !seen.has(me.id)) peers.push(me);
     return peers;
   }, [myPeerInfo]);
 
@@ -446,12 +460,19 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     (msg: SignalingMessage, fromConn?: DataConnection) => {
       switch (msg.type) {
         case "hello": {
+          if (msg.peer.id === myIdRef.current) break;
           const firstHello =
             !remotesRef.current.has(msg.peer.id) ||
             remotesRef.current.get(msg.peer.id)?.info.name === "???";
-          const remote = remotesRef.current.get(msg.peer.id);
+          let remote = remotesRef.current.get(msg.peer.id);
           const wasDisconnected = Boolean(remote?.disconnectedAt);
-          if (remote) {
+          if (!remote) {
+            remote = {
+              info: msg.peer,
+              lastHeardAt: Date.now(),
+            };
+            remotesRef.current.set(msg.peer.id, remote);
+          } else {
             remote.info = msg.peer;
             remote.lastHeardAt = Date.now();
             remote.disconnectedAt = undefined;
@@ -485,9 +506,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
               } satisfies SignalingMessage);
             }
           }
-          if (firstHello && isHostRef.current && myIdRef.current) {
+          if (isHostRef.current && myIdRef.current) {
             const roster = collectRoster();
-            broadcast({ type: "peer-joined", peer: msg.peer });
+            if (firstHello) {
+              broadcast({ type: "peer-joined", peer: msg.peer });
+            }
             broadcast({
               type: "roster",
               peers: roster,
@@ -503,6 +526,14 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
             fromConn?.peer === roomHostIdRef.current ||
             fromConn?.peer === msg.hostId;
           applyRemotePeers(msg.peers, fromHost);
+          if (
+            !isHostRef.current &&
+            fromConn?.open &&
+            (fromHost ||
+              msg.peers.some((p) => p.id !== myIdRef.current))
+          ) {
+            markGuestConnectedRef.current();
+          }
           msg.peers.forEach((p) => {
             if (p.id === myIdRef.current || !p.isSharingScreen) return;
             requestScreenFrom(p.id);
@@ -619,7 +650,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         remote.disconnectedAt = undefined;
         remote.lastHeardAt = Date.now();
         updatePlayer(remoteId, { disconnected: false });
-        if (conn.peer === roomHostIdRef.current) {
+        if (!isHostRef.current && conn.peer === roomHostIdRef.current) {
+          markGuestConnectedRef.current();
+        } else if (isHostRef.current && conn.peer === roomHostIdRef.current) {
           stopHostConnectRetryRef.current();
           setConnectionStatus("connected");
           setError((prev) =>
@@ -850,6 +883,52 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     };
   });
 
+  const markGuestSignalingConnected = useCallback(() => {
+    if (isHostRef.current) return;
+    hostMissCountRef.current = 0;
+    stopHostConnectRetryRef.current();
+    stopHostTakeoverProbeRef.current();
+    setConnectionStatus((prev) => (prev === "connected" ? prev : "connected"));
+    setError((prev) =>
+      prev?.startsWith("เชื่อมต่อไม่สำเร็จ") ? null : prev
+    );
+    if (!hasPlayedJoinSoundRef.current) {
+      hasPlayedJoinSoundRef.current = true;
+      playJoinSound();
+    }
+  }, []);
+
+  const stopHostTakeoverProbe = useCallback(() => {
+    if (hostTakeoverTimerRef.current) {
+      clearInterval(hostTakeoverTimerRef.current);
+      hostTakeoverTimerRef.current = null;
+    }
+  }, []);
+
+  const startHostTakeoverProbe = useCallback(() => {
+    if (hostTakeoverTimerRef.current || isHostRef.current) return;
+    hostTakeoverTimerRef.current = setInterval(() => {
+      if (isHostRef.current || !peerRef.current) {
+        stopHostTakeoverProbe();
+        return;
+      }
+      const hostConn = remotesRef.current.get(roomHostIdRef.current);
+      if (hostConn?.conn?.open) {
+        stopHostTakeoverProbe();
+        return;
+      }
+      if (!takeoverInFlightRef.current) {
+        tryTakeoverRef.current();
+      }
+    }, HOST_TAKEOVER_PROBE_MS);
+  }, [stopHostTakeoverProbe]);
+
+  useEffect(() => {
+    markGuestConnectedRef.current = markGuestSignalingConnected;
+    stopHostTakeoverProbeRef.current = stopHostTakeoverProbe;
+    startHostTakeoverProbeRef.current = startHostTakeoverProbe;
+  });
+
   const startHostConnectRetry = useCallback(() => {
     if (hostConnectTimerRef.current) return;
 
@@ -876,14 +955,33 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       }
 
       attempts += 1;
-      const takeoverAfter = isIosDevice() ? 30 : 18;
+      const takeoverAfter = isIosDevice() ? 15 : 8;
       if (attempts === RELAY_FALLBACK_AFTER && !forceRelayRef.current) {
         switchToRelayRef.current();
         return;
       }
-      if (attempts === takeoverAfter) {
-        tryTakeoverRef.current();
-        return;
+      if (
+        attempts === HOST_TAKEOVER_RETRY_AFTER ||
+        attempts === takeoverAfter ||
+        (attempts > takeoverAfter && attempts % 4 === 0)
+      ) {
+        if (!takeoverInFlightRef.current) {
+          tryTakeoverRef.current();
+        }
+      }
+      const hostRemote = remotesRef.current.get(roomHostIdRef.current);
+      if (
+        hostRemote?.conn &&
+        !hostRemote.conn.open &&
+        hostRemote.connStartedAt &&
+        Date.now() - hostRemote.connStartedAt > STUCK_CONN_MS
+      ) {
+        try {
+          hostRemote.conn.close();
+        } catch {
+          /* already closed */
+        }
+        hostRemote.conn = undefined;
       }
       connectToPeerRef.current(roomHostIdRef.current);
 
@@ -923,6 +1021,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     isHostRef.current = false;
     myIdRef.current = null;
     hasPlayedJoinSoundRef.current = false;
+    hostMissCountRef.current = 0;
+    takeoverInFlightRef.current = false;
 
     let session = 0;
     let relayTimer: ReturnType<typeof setTimeout> | null = null;
@@ -977,7 +1077,16 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         if (missing) {
           removePlayerRef.current(missing);
           if (missing === roomHostId && !isHostRef.current) {
+            hostMissCountRef.current += 1;
+            if (
+              hostMissCountRef.current >= HOST_PEER_UNAVAILABLE_TAKEOVER &&
+              !takeoverInFlightRef.current
+            ) {
+              hostMissCountRef.current = 0;
+              tryTakeoverRef.current();
+            }
             startHostConnectRetryRef.current();
+            startHostTakeoverProbeRef.current();
           }
           return;
         }
@@ -1006,6 +1115,21 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       });
     }
 
+    function clearRoomHostStub() {
+      const stubId = roomHostIdRef.current;
+      const stub = remotesRef.current.get(stubId);
+      if (!stub) return;
+      try {
+        stub.conn?.close();
+      } catch {
+        /* already closed */
+      }
+      remotesRef.current.delete(stubId);
+      if (!isHostRef.current || myIdRef.current !== stubId) {
+        removePlayerRef.current(stubId);
+      }
+    }
+
     function onPeerReady(peer: Peer, peerIsHost: boolean) {
       if (destroyed) {
         peer.destroy();
@@ -1018,10 +1142,15 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       isHostRef.current = peerIsHost;
       hostIdRef.current = peerIsHost ? peer.id : roomHostId;
 
+      if (peerIsHost) {
+        clearRoomHostStub();
+      }
+
       announceJoin(peer.id);
 
       if (peerIsHost) {
         stopHostConnectRetryRef.current();
+        stopHostTakeoverProbeRef.current();
         setConnectionStatus("connected");
         setConnected(true);
         if (!hasPlayedJoinSoundRef.current) {
@@ -1033,6 +1162,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         setConnectionStatus("connecting");
         connectToPeerRef.current(roomHostId);
         startHostConnectRetryRef.current();
+        startHostTakeoverProbeRef.current();
       }
     }
 
@@ -1079,7 +1209,13 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       hostPeer.on("error", (err) => {
         if (destroyed || session !== currentSession) return;
         if (err.type === "unavailable-id") {
+          try {
+            hostPeer.destroy();
+          } catch {
+            /* already closing */
+          }
           openGuestPeer();
+          startHostTakeoverProbeRef.current();
         }
       });
 
@@ -1087,22 +1223,26 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     }
 
     function tryTakeoverHost() {
-      if (destroyed || isHostRef.current) return;
-      stopHostConnectRetryRef.current();
+      if (destroyed || isHostRef.current || takeoverInFlightRef.current) return;
+      takeoverInFlightRef.current = true;
       session += 1;
       const currentSession = session;
       const takeoverPeer = new Peer(roomHostId, peerOptions());
 
       takeoverPeer.on("open", () => {
+        takeoverInFlightRef.current = false;
         if (destroyed || session !== currentSession) {
           takeoverPeer.destroy();
           return;
         }
+        stopHostConnectRetryRef.current();
+        stopHostTakeoverProbeRef.current();
         try {
           peerRef.current?.destroy();
         } catch {
           /* already closing */
         }
+        clearRoomHostStub();
         onPeerReady(takeoverPeer, true);
         remotesRef.current.forEach((remote) => {
           connectToPeerRef.current(remote.info.id);
@@ -1110,9 +1250,16 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       });
 
       takeoverPeer.on("error", (err) => {
+        takeoverInFlightRef.current = false;
         if (destroyed || session !== currentSession) return;
+        try {
+          takeoverPeer.destroy();
+        } catch {
+          /* already closing */
+        }
         if (err.type === "unavailable-id") {
           startHostConnectRetryRef.current();
+          startHostTakeoverProbeRef.current();
         }
       });
 
@@ -1217,6 +1364,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       window.removeEventListener("beforeunload", announceLeave);
       if (relayTimer) clearTimeout(relayTimer);
       stopHostConnectRetry();
+      stopHostTakeoverProbe();
       announceLeave();
       localMonitorRef.current?.stop();
       remotes.forEach((remote) => {
@@ -1246,6 +1394,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     setupAudioCall,
     startHostConnectRetry,
     stopHostConnectRetry,
+    stopHostTakeoverProbe,
     broadcast,
     updatePlayer,
   ]);
