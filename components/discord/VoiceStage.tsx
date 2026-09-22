@@ -194,8 +194,8 @@ export function ScreenStage({
   const sharerName =
     remoteScreen?.name ??
     (isSharing ? players.find((p) => p.id === myId)?.name : undefined);
-  const quality = streamQualityLabel(mainStream);
-  const showingShare = Boolean(mainStream || isSharing);
+  const quality = mainStream ? streamQualityLabel(mainStream) : "";
+  const showingShare = Boolean(mainStream);
 
   const toggleFullscreen = useCallback(async () => {
     const node = stageRef.current;
@@ -265,9 +265,11 @@ export function ScreenStage({
             </p>
           )}
         </div>
-        <span className="rounded bg-black/50 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-white">
-          {quality || t.live}
-        </span>
+        {quality ? (
+          <span className="rounded bg-black/50 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-white">
+            {quality}
+          </span>
+        ) : null}
       </div>
 
       <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -277,15 +279,7 @@ export function ScreenStage({
             className="h-full w-full"
             label={t.screenShareTitle}
           />
-        ) : isSharing ? (
-          <p className="px-6 text-center text-sm text-[#faa61a]">
-            🖥️ {t.sharingActive}
-          </p>
-        ) : (
-          <p className="px-6 text-center text-sm text-[#949ba4]">
-            {t.waitingForShare}
-          </p>
-        )}
+        ) : null}
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-20 z-10 flex items-end justify-between px-4">

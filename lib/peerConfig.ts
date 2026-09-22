@@ -231,9 +231,71 @@ export function mediaStreamIsDisplayable(
   if (!stream?.active) return false;
   const tracks = stream.getVideoTracks();
   if (tracks.length === 0) return false;
-  return tracks.some(
-    (t) => t.readyState === "live" && !t.muted
-  );
+  return tracks.some((t) => videoTrackIsDisplayable(t));
+}
+
+export function videoTrackIsDisplayable(track: MediaStreamTrack): boolean {
+  if (track.kind !== "video") return false;
+  if (track.readyState !== "live" || track.muted || !track.enabled) return false;
+  const settings = track.getSettings?.();
+  if (settings && (settings.width === 0 || settings.height === 0)) return false;
+  return true;
+}
+
+/**
+ * Wait until a capture/remote stream produces real video frames (not just a live black track).
+ * Resolves false on timeout, mute, end, or inactive stream.
+ */
+export function waitForDisplayableStream(
+  stream: MediaStream,
+  timeoutMs = 3000
+): Promise<boolean> {
+  if (typeof document === "undefined") {
+    return Promise.resolve(mediaStreamIsDisplayable(stream));
+  }
+  if (!stream.active || stream.getVideoTracks().length === 0) {
+    return Promise.resolve(false);
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "true");
+    video.srcObject = stream;
+
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      video.pause();
+      video.removeAttribute("src");
+      video.srcObject = null;
+      resolve(ok);
+    };
+
+    const hasFrames = () =>
+      mediaStreamIsDisplayable(stream) &&
+      video.videoWidth > 0 &&
+      video.videoHeight > 0;
+
+    const check = () => {
+      if (hasFrames()) finish(true);
+    };
+
+    video.addEventListener("loadeddata", check);
+    video.addEventListener("resize", check);
+    stream.getVideoTracks().forEach((track) => {
+      track.addEventListener("ended", () => finish(false));
+      track.addEventListener("mute", () => finish(false));
+    });
+    stream.addEventListener("inactive", () => finish(false));
+
+    void video.play().catch(() => finish(false));
+    const timer = window.setTimeout(() => finish(false), timeoutMs);
+    check();
+  });
 }
 
 /** Like callHasLiveVideo but ignores muted/ended tracks (black frame while PC stays up). */
@@ -242,12 +304,9 @@ export function callHasDisplayableVideo(call?: MediaConnection | null): boolean 
   const pc = call.peerConnection as RTCPeerConnection | undefined;
   if (!pc) return false;
   try {
-    return pc.getReceivers().some(
-      (r) =>
-        r.track?.kind === "video" &&
-        r.track.readyState === "live" &&
-        !r.track.muted
-    );
+    return pc
+      .getReceivers()
+      .some((r) => r.track?.kind === "video" && videoTrackIsDisplayable(r.track));
   } catch {
     return false;
   }

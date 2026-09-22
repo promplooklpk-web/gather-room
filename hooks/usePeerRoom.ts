@@ -23,6 +23,7 @@ import {
   callHasLiveVideo,
   callHasDisplayableVideo,
   mediaStreamIsDisplayable,
+  waitForDisplayableStream,
   isTransientPeerError,
   makeGuestPeerId,
   qualityFromIce,
@@ -422,15 +423,15 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       };
 
       call.on("stream", (remoteStream) => {
-        const videoTracks = remoteStream.getVideoTracks();
-        if (videoTracks.length === 0) return;
-        attachRemoteScreen(remoteId, remoteStream);
-        videoTracks.forEach((track) => {
-          track.onended = () => {
+        if (remoteStream.getVideoTracks().length === 0) return;
+        void (async () => {
+          const ok = await waitForDisplayableStream(remoteStream, 3000);
+          if (!ok) {
             clearRemoteScreen(remoteId);
-            requestScreenAgain();
-          };
-        });
+            return;
+          }
+          attachRemoteScreen(remoteId, remoteStream);
+        })();
       });
 
       watchRtcIce(call.peerConnection as RTCPeerConnection | undefined, () => {
@@ -891,12 +892,30 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         },
         audio: false,
       });
-      screenStreamRef.current = screenStream;
+
       const videoTrack = screenStream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.contentHint = "detail";
-        videoTrack.onended = () => stopScreenShareRef.current();
+      if (!videoTrack) {
+        screenStream.getTracks().forEach((t) => t.stop());
+        stopScreenShare();
+        setError(
+          "ไม่สามารถแชร์หน้าจอได้ — ไม่พบวิดีโอจากหน้าจอ / No video track from screen capture."
+        );
+        return;
       }
+
+      const displayable = await waitForDisplayableStream(screenStream, 3000);
+      if (!displayable) {
+        screenStream.getTracks().forEach((t) => t.stop());
+        stopScreenShare();
+        setError(
+          "ไม่สามารถแชร์หน้าจอได้ — สตรีมหน้าจอไม่พร้อมใช้งาน / Screen stream not available."
+        );
+        return;
+      }
+
+      screenStreamRef.current = screenStream;
+      videoTrack.contentHint = "detail";
+      videoTrack.onended = () => stopScreenShareRef.current();
 
       startScreenCallsToAll();
 
@@ -912,11 +931,12 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       }
       flushVoicePresenceRef.current();
     } catch {
+      stopScreenShare();
       setError(
         "ไม่สามารถแชร์หน้าจอได้ — กรุณาอนุญาตการแชร์หน้าจอ / Screen share denied. Please allow screen sharing."
       );
     }
-  }, [broadcast, startScreenCallsToAll, updatePlayer]);
+  }, [broadcast, startScreenCallsToAll, updatePlayer, stopScreenShare]);
 
   useEffect(() => {
     setupDataConnectionRef.current = setupDataConnection;
@@ -1568,6 +1588,10 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   useEffect(() => {
     if (!remoteScreen) return;
     const { peerId, stream } = remoteScreen;
+    let cancelled = false;
+    void waitForDisplayableStream(stream, 3500).then((ok) => {
+      if (!cancelled && !ok) clearRemoteScreen(peerId);
+    });
     const tick = () => {
       const remote = remotesRef.current.get(peerId);
       if (!mediaStreamIsDisplayable(stream) || !remote?.info.isSharingScreen) {
@@ -1576,8 +1600,24 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     };
     tick();
     const id = window.setInterval(tick, 300);
-    return () => window.clearInterval(id);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
   }, [remoteScreen, clearRemoteScreen]);
+
+  useEffect(() => {
+    if (!isSharing) return;
+    const stream = localScreen;
+    const tick = () => {
+      if (!mediaStreamIsDisplayable(stream)) {
+        stopScreenShareRef.current();
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 400);
+    return () => window.clearInterval(id);
+  }, [isSharing, localScreen]);
 
   useEffect(() => {
     if (!enabled || !connected) return;
