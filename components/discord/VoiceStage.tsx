@@ -26,6 +26,57 @@ interface ParticipantTilesProps {
   liveScreenPeerId?: string | null;
 }
 
+type TileDensity = "single" | "duo" | "crowded";
+
+function tileDensity(playerCount: number, compact: boolean): TileDensity {
+  if (compact) return "crowded";
+  if (playerCount <= 1) return "single";
+  if (playerCount === 2) return "duo";
+  return "crowded";
+}
+
+function tilesContainerClass(density: TileDensity, compact: boolean): string {
+  if (compact) {
+    return "flex flex-wrap gap-2 p-0";
+  }
+  switch (density) {
+    case "single":
+      return "flex w-full justify-center p-2 md:p-3";
+    case "duo":
+      return "grid w-full max-w-5xl grid-cols-2 gap-2 p-2 md:gap-3 md:p-3";
+    case "crowded":
+      return "grid w-full max-w-5xl grid-cols-2 gap-2 p-2 sm:grid-cols-2 md:grid-cols-3 md:gap-3 md:p-3 lg:grid-cols-[repeat(auto-fit,minmax(240px,1fr))]";
+  }
+}
+
+function tileClass(density: TileDensity, compact: boolean): string {
+  if (compact) {
+    return "h-[76px] w-[132px]";
+  }
+  switch (density) {
+    case "single":
+      return "aspect-video w-full max-w-[min(100%,760px)] min-h-[min(52vh,280px)]";
+    case "duo":
+      return "aspect-[4/3] w-full min-h-[120px] max-h-[min(38vh,220px)] md:aspect-video md:min-h-[180px] md:max-h-none";
+    case "crowded":
+      return "aspect-[4/3] w-full min-h-[96px] max-h-[min(28vh,168px)] md:aspect-video md:min-h-[160px] md:max-h-[520px] md:min-w-[200px]";
+  }
+}
+
+function avatarClass(density: TileDensity, compact: boolean): string {
+  if (compact) {
+    return "h-10 w-10 text-base";
+  }
+  switch (density) {
+    case "single":
+      return "h-20 w-20 text-3xl md:h-24 md:w-24 md:text-4xl";
+    case "duo":
+      return "h-14 w-14 text-xl md:h-16 md:w-16 md:text-2xl";
+    case "crowded":
+      return "h-11 w-11 text-base md:h-16 md:w-16 md:text-2xl";
+  }
+}
+
 export function ParticipantTiles({
   players,
   myId,
@@ -41,10 +92,11 @@ export function ParticipantTiles({
 
   if (players.length === 0) return null;
 
+  const density = tileDensity(players.length, compact);
+  const containerClass = tilesContainerClass(density, compact);
+
   return (
-    <div
-      className={`flex flex-wrap gap-2 ${compact ? "p-0" : "justify-center p-3"}`}
-    >
+    <div className={containerClass}>
       {players.map((p) => {
         const isMe = p.id === myId;
         const tileMuted = isMe && (isMuted || isDeafened);
@@ -62,25 +114,13 @@ export function ParticipantTiles({
                 : "ring-1 ring-black/40"
             } ${
               p.disconnected ? "opacity-50" : ""
-            } ${
-              compact
-                ? "h-[76px] w-[132px]"
-                : players.length === 1
-                  ? "aspect-video w-[min(100%,760px)] min-h-[280px]"
-                  : "aspect-video min-h-[180px] min-w-[240px] flex-1 basis-[280px] max-w-[520px]"
-            }`}
+            } ${tileClass(density, compact)}`}
           >
             <div className="flex h-full w-full flex-col items-center justify-center gap-2">
               <div
                 className={`flex items-center justify-center rounded-full font-bold text-white transition-all duration-150 ${
                   isSpeaking ? "ring-4 ring-[#23a559]" : ""
-                } ${
-                  compact
-                    ? "h-10 w-10 text-base"
-                    : players.length === 1
-                      ? "h-24 w-24 text-4xl"
-                      : "h-16 w-16 text-2xl"
-                }`}
+                } ${avatarClass(density, compact)}`}
                 style={{ backgroundColor: p.color }}
               >
                 {initialFromName(p.name)}
@@ -231,28 +271,34 @@ export function ScreenStage({
 
   if (!showingShare) {
     const others = players.filter((p) => p.id !== myId);
+    const waitingAlone = players.length === 0 || others.length === 0;
+
     return (
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-28 pt-6">
-        {players.length === 0 || others.length === 0 ? (
-          <>
-            {players.length > 0 && (
-              <div className="mb-6 flex w-full max-w-5xl justify-center">
-                <ParticipantTiles
-                  players={players}
-                  myId={myId}
-                  isMuted={isMuted}
-                  isDeafened={isDeafened}
-                  speakingPeers={speakingPeers}
-                  userVolumes={userVolumes}
-                  onSetUserVolume={onSetUserVolume}
-                  liveScreenPeerId={liveScreenPeerId}
-                />
-              </div>
-            )}
-            <p className="text-sm text-[#949ba4]">{t.waitingForPeople}</p>
-          </>
-        ) : (
-          <div className="flex w-full max-w-5xl justify-center">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          className={`relative z-0 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-safe-3 pb-stage-controls pt-3 md:px-6 md:pt-6 ${
+            waitingAlone ? "items-center justify-center" : "items-stretch justify-start md:items-center md:justify-center"
+          }`}
+        >
+          {waitingAlone ? (
+            <>
+              {players.length > 0 && (
+                <div className="mb-4 flex w-full justify-center md:mb-6">
+                  <ParticipantTiles
+                    players={players}
+                    myId={myId}
+                    isMuted={isMuted}
+                    isDeafened={isDeafened}
+                    speakingPeers={speakingPeers}
+                    userVolumes={userVolumes}
+                    onSetUserVolume={onSetUserVolume}
+                    liveScreenPeerId={liveScreenPeerId}
+                  />
+                </div>
+              )}
+              <p className="px-2 text-center text-sm text-[#949ba4]">{t.waitingForPeople}</p>
+            </>
+          ) : (
             <ParticipantTiles
               players={players}
               myId={myId}
@@ -263,8 +309,8 @@ export function ScreenStage({
               onSetUserVolume={onSetUserVolume}
               liveScreenPeerId={liveScreenPeerId}
             />
-          </div>
-        )}
+          )}
+        </div>
       </div>
     );
   }
