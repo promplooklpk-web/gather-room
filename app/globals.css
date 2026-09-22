@@ -29,3 +29,19 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), "gg sans", "Noto Sans", Arial, Helvetica, sans-serif;
 }
+
+/* iOS Safari safe areas (requires viewport-fit=cover on the viewport meta tag) */
+@layer utilities {
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .px-safe {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+}
