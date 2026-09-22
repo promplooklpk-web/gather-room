@@ -188,6 +188,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   const forceRelayRef = useRef(false);
   const switchingRelayRef = useRef(false);
   const skippedPeerUntilRef = useRef<Map<string, number>>(new Map());
+  const localPeerOpenRef = useRef(false);
 
   useEffect(() => {
     nameRef.current = name;
@@ -1111,6 +1112,13 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
     let attempts = 0;
     hostConnectTimerRef.current = setInterval(() => {
+      if (presenceModeRef.current) {
+        if (hostConnectTimerRef.current) {
+          clearInterval(hostConnectTimerRef.current);
+          hostConnectTimerRef.current = null;
+        }
+        return;
+      }
       if (!peerRef.current || isHostRef.current) {
         if (hostConnectTimerRef.current) {
           clearInterval(hostConnectTimerRef.current);
@@ -1167,6 +1175,10 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           clearInterval(hostConnectTimerRef.current);
           hostConnectTimerRef.current = null;
         }
+        if (presenceModeRef.current && localPeerOpenRef.current) {
+          markGuestConnectedRef.current();
+          return;
+        }
         setError(
           "เชื่อมต่อไม่สำเร็จ — กด «เชื่อมต่อใหม่»ด้านบน / Connection failed. Tap Reconnect."
         );
@@ -1207,6 +1219,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     hasPlayedJoinSoundRef.current = false;
     hostMissCountRef.current = 0;
     takeoverInFlightRef.current = false;
+    localPeerOpenRef.current = false;
+    skippedPeerUntilRef.current.clear();
 
     let session = 0;
     let relayTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1257,6 +1271,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
       peer.on("close", () => {
         if (destroyed || switchingRelayRef.current) return;
+        localPeerOpenRef.current = false;
         setRawConnectionStatus("disconnected");
       });
 
@@ -1309,6 +1324,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           }
         }
 
+        if (presenceModeRef.current && localPeerOpenRef.current) {
+          return;
+        }
         setError(
           `เชื่อมต่อเครือข่ายไม่สำเร็จ (${err.type || "unknown"}) / Connection error. กำลังลองใหม่...`
         );
@@ -1337,6 +1355,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         return;
       }
       peerRef.current = peer;
+      localPeerOpenRef.current = true;
       myIdRef.current = peer.id;
       setMyId(peer.id);
       setIsHost(peerIsHost);

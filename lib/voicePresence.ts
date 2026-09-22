@@ -2,13 +2,19 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { getPeerRealm } from "@/lib/rooms";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 import { isDialableMeshPeerId } from "@/lib/voicePeerIds";
+import {
+  VOICE_PEER_DB_TTL_MS,
+  VOICE_PEER_DIAL_MAX_AGE_MS,
+  VOICE_PEER_HEARTBEAT_MS,
+  VOICE_PEER_POLL_MS,
+  VOICE_PEER_STALE_PURGE_INTERVAL_MS,
+  dbTtlCutoffIso,
+  dialCutoffIso,
+  isRowFresh,
+} from "@/lib/voicePeerTtl";
 import type { PeerInfo, PresenceSyncStatus } from "@/lib/types";
 
 const LOG_PREFIX = "[voice-peers]";
-const HEARTBEAT_MS = 3000;
-/** Poll even when Realtime postgres_changes is delayed or filtered incorrectly. */
-const POLL_SYNC_MS = 4000;
-const STALE_PEER_MS = 30_000;
 
 export interface VoicePresencePayload {
   peerId: string;
@@ -23,8 +29,26 @@ export interface VoicePresenceSession {
   stop: () => void;
 }
 
-function staleCutoffIso(): string {
-  return new Date(Date.now() - STALE_PEER_MS).toISOString();
+/** Delete expired rows for this room session so sync cannot resurrect ghosts. */
+export async function purgeStaleVoicePeers(
+  roomId: string,
+  session: string,
+  maxAgeMs = VOICE_PEER_DB_TTL_MS
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+  const cutoff = dbTtlCutoffIso(maxAgeMs);
+  const { error, count } = await supabase
+    .from("voice_peers")
+    .delete({ count: "exact" })
+    .eq("room_id", roomId)
+    .eq("session_id", session)
+    .lt("updated_at", cutoff);
+  if (error) {
+    console.warn(LOG_PREFIX, "stale purge error", error.message);
+  } else if (count && count > 0) {
+    console.info(LOG_PREFIX, "stale purge", { roomId, session, count });
+  }
 }
 
 async function fetchActivePeers(
@@ -39,7 +63,7 @@ async function fetchActivePeers(
     .select("peer_id, name, color, is_sharing_screen, updated_at")
     .eq("room_id", roomId)
     .eq("session_id", session)
-    .gt("updated_at", staleCutoffIso());
+    .gt("updated_at", dialCutoffIso());
   if (error) {
     console.warn(LOG_PREFIX, "fetch error", error.message);
     return [];
@@ -47,6 +71,10 @@ async function fetchActivePeers(
   const peers: PeerInfo[] = [];
   for (const row of data ?? []) {
     if (!row.peer_id || row.peer_id === selfPeerId) continue;
+    if (!isRowFresh(row.updated_at)) {
+      void purgeVoicePeer(roomId, session, row.peer_id);
+      continue;
+    }
     if (!isDialableMeshPeerId(row.peer_id, roomId, session)) {
       void purgeVoicePeer(roomId, session, row.peer_id);
       continue;
@@ -202,6 +230,7 @@ export function startVoicePresence(
       onChannelStatus?.("connected");
       const latest = getSelf();
       if (!latest) return;
+      await purgeStaleVoicePeers(roomId, session);
       await upsertSelf(roomId, session, latest);
       await emitSync();
       return;
@@ -221,12 +250,17 @@ export function startVoicePresence(
     const latest = getSelf();
     if (!latest) return;
     void upsertSelf(roomId, session, latest).then(() => scheduleSync());
-  }, HEARTBEAT_MS);
+  }, VOICE_PEER_HEARTBEAT_MS);
 
   const pollSync = window.setInterval(() => {
     if (stopped) return;
     void emitSync();
-  }, POLL_SYNC_MS);
+  }, VOICE_PEER_POLL_MS);
+
+  const stalePurge = window.setInterval(() => {
+    if (stopped) return;
+    void purgeStaleVoicePeers(roomId, session).then(() => scheduleSync());
+  }, VOICE_PEER_STALE_PURGE_INTERVAL_MS);
 
   return {
     stop: () => {
@@ -235,6 +269,7 @@ export function startVoicePresence(
       if (debounceTimer) clearTimeout(debounceTimer);
       window.clearInterval(heartbeat);
       window.clearInterval(pollSync);
+      window.clearInterval(stalePurge);
       const latest = getSelf();
       if (latest?.peerId) {
         void removeSelf(roomId, session, latest.peerId);

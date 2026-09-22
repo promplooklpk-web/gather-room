@@ -1,11 +1,14 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { getPeerRealm, VOICE_ROOMS } from "@/lib/rooms";
 import { isOccupancyPeerId } from "@/lib/voicePeerIds";
+import {
+  VOICE_PEER_DIAL_MAX_AGE_MS,
+  VOICE_PEER_POLL_MS,
+  dialCutoffIso,
+} from "@/lib/voicePeerTtl";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
 const LOG_PREFIX = "[all-rooms-presence]";
-const STALE_PEER_MS = 45_000;
-const POLL_SYNC_MS = 4000;
 
 export interface RoomOccupant {
   peerId: string;
@@ -15,10 +18,6 @@ export interface RoomOccupant {
 }
 
 export type RoomOccupancyMap = Record<string, RoomOccupant[]>;
-
-function staleCutoffIso(): string {
-  return new Date(Date.now() - STALE_PEER_MS).toISOString();
-}
 
 function trackedRoomIds(): string[] {
   return VOICE_ROOMS.map((r) => r.id);
@@ -91,7 +90,7 @@ export async function fetchAllRoomsOccupancy(): Promise<RoomOccupancyMap> {
     .from("voice_peers")
     .select("room_id, peer_id, name, color, is_sharing_screen, updated_at")
     .in("room_id", trackedRoomIds())
-    .gt("updated_at", staleCutoffIso());
+    .gt("updated_at", dialCutoffIso(VOICE_PEER_DIAL_MAX_AGE_MS));
 
   if (error) {
     console.warn(LOG_PREFIX, "fetch error", error.message);
@@ -159,7 +158,7 @@ export function startAllRoomsPresence(
   const pollSync = window.setInterval(() => {
     if (stopped) return;
     void emitSync();
-  }, POLL_SYNC_MS);
+  }, VOICE_PEER_POLL_MS);
 
   void emitSync();
 

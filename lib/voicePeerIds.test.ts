@@ -4,6 +4,7 @@ import {
   isDialableMeshPeerId,
   isLegacyGuestPeerId,
 } from "./voicePeerIds";
+import { isRowFresh } from "./voicePeerTtl";
 
 const roomId = "meeting-1";
 const session = "ch-meeting-1";
@@ -25,5 +26,8 @@ assert.equal(
   isDialableMeshPeerId("mtlclick-lpk-meeting-1-ch-meeting-1-host", roomId, session),
   false
 );
+
+assert.equal(isRowFresh(new Date().toISOString()), true);
+assert.equal(isRowFresh(new Date(Date.now() - 120_000).toISOString()), false);
 
 console.log("voicePeerIds tests passed");
