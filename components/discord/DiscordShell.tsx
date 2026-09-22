@@ -59,6 +59,7 @@ function VoiceRoomSession({
     toggleMute,
     startScreenShare,
     stopScreenShare,
+    exitScreenStage,
     getShareUrl,
     unlockAudio,
     retryConnection,
@@ -128,7 +129,6 @@ function VoiceRoomSession({
     };
   }, []);
 
-  const someoneSharing = players.some((p) => p.isSharingScreen);
   const roomLabel = `${room.labelTh} / ${room.label}`;
   const userColor = myPlayer?.color ?? "#5865f2";
 
@@ -263,10 +263,10 @@ function VoiceRoomSession({
             isSharing={isSharing}
             isMuted={isMuted}
             isDeafened={isDeafened}
-            someoneSharing={someoneSharing}
             speakingPeers={speakingPeers}
             userVolumes={userVolumes}
             onSetUserVolume={setUserVolume}
+            onExitScreenStage={exitScreenStage}
           />
 
           <FloatingControlBar

@@ -4,8 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PlayerState } from "@/lib/types";
 import { RemoteVideo } from "@/components/RemoteVideo";
 import { t } from "@/lib/i18n";
-import { mediaStreamIsDisplayable } from "@/lib/peerConfig";
 import { initialFromName } from "@/lib/colors";
+import { useVerifiedDisplayStream } from "@/components/useVerifiedDisplayStream";
 import {
   ExitFullscreenIcon,
   FullscreenIcon,
@@ -22,6 +22,8 @@ interface ParticipantTilesProps {
   speakingPeers?: Record<string, boolean>;
   userVolumes?: Record<string, number>;
   onSetUserVolume?: (peerId: string, volume: number) => void;
+  /** Only show the green share icon for peers with a verified stage stream */
+  liveScreenPeerId?: string | null;
 }
 
 export function ParticipantTiles({
@@ -33,6 +35,7 @@ export function ParticipantTiles({
   speakingPeers = {},
   userVolumes = {},
   onSetUserVolume,
+  liveScreenPeerId = null,
 }: ParticipantTilesProps) {
   const [activeVolumePeerId, setActiveVolumePeerId] = useState<string | null>(null);
 
@@ -48,6 +51,7 @@ export function ParticipantTiles({
         const isSpeaking = Boolean(speakingPeers[p.id]);
         const currentVolume = userVolumes[p.id] ?? 100;
         const showVolumePopup = activeVolumePeerId === p.id && !isMe;
+        const showShareIcon = liveScreenPeerId === p.id;
 
         return (
           <div
@@ -83,7 +87,6 @@ export function ParticipantTiles({
               </div>
             </div>
 
-            {/* Bottom metadata strip */}
             <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/60 px-2 py-1">
               <div className="flex min-w-0 items-center gap-1.5">
                 {tileMuted && (
@@ -91,7 +94,7 @@ export function ParticipantTiles({
                     <MicOffIcon width={12} height={12} />
                   </span>
                 )}
-                {p.isSharingScreen && (
+                {showShareIcon && (
                   <span className="text-[#23a559]">
                     <ScreenShareIcon width={12} height={12} />
                   </span>
@@ -102,7 +105,6 @@ export function ParticipantTiles({
                 </span>
               </div>
 
-              {/* Volume button for remote peers */}
               {!isMe && onSetUserVolume && (
                 <div className="relative">
                   <button
@@ -119,7 +121,6 @@ export function ParticipantTiles({
                     </svg>
                   </button>
 
-                  {/* Volume Slider Popover */}
                   {showVolumePopup && (
                     <div className="absolute bottom-6 right-0 z-30 flex w-36 flex-col gap-1.5 rounded-lg border border-[#1f2023] bg-[#2b2d31] p-2.5 shadow-xl">
                       <div className="flex items-center justify-between text-[10px] text-[#dbdee1]">
@@ -150,15 +151,15 @@ interface ScreenStageProps {
   players: PlayerState[];
   myId: string | null;
   roomLabel: string;
-  remoteScreen: { name: string; stream: MediaStream } | null;
+  remoteScreen: { peerId: string; name: string; stream: MediaStream } | null;
   localScreen: MediaStream | null;
   isSharing: boolean;
   isMuted: boolean;
   isDeafened: boolean;
-  someoneSharing: boolean;
   speakingPeers?: Record<string, boolean>;
   userVolumes?: Record<string, number>;
   onSetUserVolume?: (peerId: string, volume: number) => void;
+  onExitScreenStage?: () => void;
 }
 
 function streamQualityLabel(stream: MediaStream | null): string {
@@ -177,25 +178,31 @@ export function ScreenStage({
   isSharing,
   isMuted,
   isDeafened,
-  someoneSharing: _someoneSharing,
   speakingPeers = {},
   userVolumes = {},
   onSetUserVolume,
+  onExitScreenStage,
 }: ScreenStageProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const pickDisplayable = (stream: MediaStream | null) =>
-    stream && mediaStreamIsDisplayable(stream) ? stream : null;
-  const mainStream =
-    pickDisplayable(remoteScreen?.stream ?? null) ??
-    pickDisplayable(localScreen) ??
-    null;
+  const candidateStream = remoteScreen?.stream ?? localScreen ?? null;
+  const verifiedStream = useVerifiedDisplayStream(candidateStream, onExitScreenStage);
+
+  const liveScreenPeerId =
+    verifiedStream && remoteScreen?.stream === verifiedStream
+      ? remoteScreen.peerId
+      : verifiedStream && localScreen === verifiedStream
+        ? myId
+        : null;
+
   const sharerName =
-    remoteScreen?.name ??
-    (isSharing ? players.find((p) => p.id === myId)?.name : undefined);
-  const quality = mainStream ? streamQualityLabel(mainStream) : "";
-  const showingShare = Boolean(mainStream);
+    (remoteScreen?.stream === verifiedStream ? remoteScreen.name : undefined) ??
+    (isSharing && localScreen === verifiedStream
+      ? players.find((p) => p.id === myId)?.name
+      : undefined);
+  const quality = verifiedStream ? streamQualityLabel(verifiedStream) : "";
+  const showingShare = Boolean(verifiedStream);
 
   const toggleFullscreen = useCallback(async () => {
     const node = stageRef.current;
@@ -213,6 +220,15 @@ export function ScreenStage({
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
 
+  useEffect(() => {
+    if (!showingShare || !onExitScreenStage) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onExitScreenStage();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showingShare, onExitScreenStage]);
+
   if (!showingShare) {
     const others = players.filter((p) => p.id !== myId);
     return (
@@ -229,6 +245,7 @@ export function ScreenStage({
                   speakingPeers={speakingPeers}
                   userVolumes={userVolumes}
                   onSetUserVolume={onSetUserVolume}
+                  liveScreenPeerId={liveScreenPeerId}
                 />
               </div>
             )}
@@ -244,6 +261,7 @@ export function ScreenStage({
               speakingPeers={speakingPeers}
               userVolumes={userVolumes}
               onSetUserVolume={onSetUserVolume}
+              liveScreenPeerId={liveScreenPeerId}
             />
           </div>
         )}
@@ -265,17 +283,28 @@ export function ScreenStage({
             </p>
           )}
         </div>
-        {quality ? (
-          <span className="rounded bg-black/50 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-white">
-            {quality}
-          </span>
-        ) : null}
+        <div className="pointer-events-auto flex items-center gap-2">
+          {quality ? (
+            <span className="rounded bg-black/50 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-white">
+              {quality}
+            </span>
+          ) : null}
+          {onExitScreenStage && (
+            <button
+              type="button"
+              onClick={onExitScreenStage}
+              className="rounded bg-black/50 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-black/70"
+            >
+              {t.exitScreenView}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1 items-center justify-center">
-        {mainStream ? (
+        {verifiedStream ? (
           <RemoteVideo
-            stream={mainStream}
+            stream={verifiedStream}
             className="h-full w-full"
             label={t.screenShareTitle}
           />
@@ -293,6 +322,7 @@ export function ScreenStage({
             speakingPeers={speakingPeers}
             userVolumes={userVolumes}
             onSetUserVolume={onSetUserVolume}
+            liveScreenPeerId={liveScreenPeerId}
           />
         </div>
         <button
