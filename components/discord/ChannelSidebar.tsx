@@ -16,6 +16,7 @@ interface ChannelSidebarProps {
   myId: string | null;
   connected: boolean;
   connectionStatus: ConnectionStatus;
+  connectionStatusRaw?: ConnectionStatus;
   connectionQuality: ConnectionQuality;
   presenceSyncStatus?: PresenceSyncStatus;
   connectingStuck?: boolean;
@@ -89,6 +90,7 @@ export function ChannelSidebar({
   myId,
   connected,
   connectionStatus,
+  connectionStatusRaw,
   connectionQuality,
   presenceSyncStatus = "idle",
   connectingStuck = false,
@@ -171,6 +173,7 @@ export function ChannelSidebar({
         userColor={userColor}
         connected={connected}
         connectionStatus={connectionStatus}
+        connectionStatusRaw={connectionStatusRaw}
         connectionQuality={connectionQuality}
         presenceSyncStatus={presenceSyncStatus}
         connectingStuck={connectingStuck}

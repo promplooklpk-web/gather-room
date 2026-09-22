@@ -13,6 +13,7 @@ type ConnectionStripLayout = "inline" | "banner";
 
 export function ConnectionStrip({
   status,
+  reconnectStatus,
   quality,
   presenceSyncStatus = "idle",
   connectingStuck = false,
@@ -21,6 +22,8 @@ export function ConnectionStrip({
   className = "",
 }: {
   status: ConnectionStatus;
+  /** Use raw (non-debounced) status for reconnect affordance when provided. */
+  reconnectStatus?: ConnectionStatus;
   quality: ConnectionQuality;
   presenceSyncStatus?: PresenceSyncStatus;
   connectingStuck?: boolean;
@@ -28,7 +31,7 @@ export function ConnectionStrip({
   layout?: ConnectionStripLayout;
   className?: string;
 }) {
-  const showRetry = shouldOfferReconnect(status, connectingStuck);
+  const showRetry = shouldOfferReconnect(reconnectStatus ?? status);
   const tone = connectionStatusTone(status);
   const ok = tone === "ok";
   const failed = tone === "bad";

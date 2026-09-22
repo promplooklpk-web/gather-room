@@ -49,6 +49,7 @@ function VoiceRoomSession({
     players,
     connected,
     connectionStatus,
+    connectionStatusRaw,
     connectionQuality,
     presenceSyncStatus,
     connectingStuck,
@@ -139,7 +140,8 @@ function VoiceRoomSession({
   const showConnectionBanner = shouldShowConnectionBanner(
     connectionStatus,
     presenceSyncStatus,
-    connectingStuck
+    connectingStuck,
+    connectionStatusRaw
   );
 
   const sidebarProps = {
@@ -151,6 +153,7 @@ function VoiceRoomSession({
     myId,
     connected,
     connectionStatus,
+    connectionStatusRaw,
     connectionQuality,
     presenceSyncStatus,
     connectingStuck,
@@ -246,6 +249,7 @@ function VoiceRoomSession({
                     layout="inline"
                     className="hidden md:flex"
                     status={connectionStatus}
+                    reconnectStatus={connectionStatusRaw}
                     quality={connectionQuality}
                     presenceSyncStatus={presenceSyncStatus}
                     connectingStuck={connectingStuck}
@@ -280,6 +284,7 @@ function VoiceRoomSession({
               <ConnectionStrip
                 layout="banner"
                 status={connectionStatus}
+                reconnectStatus={connectionStatusRaw}
                 quality={connectionQuality}
                 presenceSyncStatus={presenceSyncStatus}
                 connectingStuck={connectingStuck}
@@ -370,7 +375,7 @@ export function DiscordShell({ userName, onLogout }: DiscordShellProps) {
   };
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-[#1e1f22] text-[#dbdee1]">
+    <div className="flex h-screen w-full overflow-hidden bg-[#1e1f22] text-[#dbdee1]">
       <VoiceRoomSession
         key={activeRoomId}
         userName={userName}

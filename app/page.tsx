@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { JoinScreen } from "@/components/JoinScreen";
 import { DiscordShell } from "@/components/discord/DiscordShell";
 
@@ -17,6 +17,21 @@ function readStoredName(): string | null {
 
 export default function HomePage() {
   const [name, setName] = useState<string | null>(readStoredName);
+
+  // Recover in-room session after iOS tab suspend / brief offline (sessionStorage may clear).
+  useEffect(() => {
+    const restore = () => {
+      const stored = readStoredName();
+      if (stored) setName(stored);
+    };
+    restore();
+    document.addEventListener("visibilitychange", restore);
+    window.addEventListener("pageshow", restore);
+    return () => {
+      document.removeEventListener("visibilitychange", restore);
+      window.removeEventListener("pageshow", restore);
+    };
+  }, []);
 
   const handleJoin = (playerName: string) => {
     sessionStorage.setItem(SESSION_STORAGE_KEY, playerName);
