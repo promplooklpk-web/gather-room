@@ -66,4 +66,15 @@ body {
   .pb-safe-4 {
     padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
   }
+
+  /* Voice stage scroll area — clears floating control bar + home indicator */
+  .pb-stage-controls {
+    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  @media (min-width: 48rem) {
+    .md\:pb-stage-controls {
+      padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+    }
+  }
 }
