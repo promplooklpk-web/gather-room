@@ -21,6 +21,8 @@ import {
   inspectIceQuality,
   isMediaCallLive,
   callHasLiveVideo,
+  callHasDisplayableVideo,
+  mediaStreamIsDisplayable,
   isTransientPeerError,
   makeGuestPeerId,
   qualityFromIce,
@@ -44,7 +46,7 @@ import {
   getShareUrl as buildShareUrl,
 } from "@/lib/rooms";
 import { isPresenceDiscoveryEnabled } from "@/lib/supabaseClient";
-import { startVoicePresence } from "@/lib/voicePresence";
+import { flushVoicePresence, startVoicePresence } from "@/lib/voicePresence";
 import type {
   ChatMessage,
   ConnectionQuality,
@@ -124,6 +126,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     name: string;
     stream: MediaStream;
   } | null>(null);
+  const remoteScreenRef = useRef(remoteScreen);
   const [localScreen, setLocalScreen] = useState<MediaStream | null>(null);
 
   // Enhancements: Chat, Speaking Indicator, Per-User Volume
@@ -163,6 +166,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   const takeoverInFlightRef = useRef(false);
   const presenceModeRef = useRef(false);
   const stopVoicePresenceRef = useRef<() => void>(() => {});
+  const flushVoicePresenceRef = useRef<() => void>(() => {});
+  const roomSessionRef = useRef("");
   const markGuestConnectedRef = useRef<() => void>(() => {});
   const startHostTakeoverProbeRef = useRef<() => void>(() => {});
   const stopHostTakeoverProbeRef = useRef<() => void>(() => {});
@@ -172,6 +177,10 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   useEffect(() => {
     nameRef.current = name;
   }, [name]);
+
+  useEffect(() => {
+    remoteScreenRef.current = remoteScreen;
+  }, [remoteScreen]);
 
   useEffect(() => {
     if (!myColorRef.current) {
@@ -212,22 +221,41 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     });
   }, []);
 
-  const attachRemoteScreen = useCallback(
-    (peerId: string, stream: MediaStream) => {
-      const remote = remotesRef.current.get(peerId);
-      const peerName = remote?.info.name || "???";
-      setRemoteScreen({ peerId, name: peerName, stream });
-      updatePlayer(peerId, { isSharingScreen: true });
-    },
-    [updatePlayer]
-  );
-
   const clearRemoteScreen = useCallback(
     (peerId: string) => {
+      const remote = remotesRef.current.get(peerId);
+      if (remote) {
+        remote.info = { ...remote.info, isSharingScreen: false };
+      }
       setRemoteScreen((prev) => (prev?.peerId === peerId ? null : prev));
       updatePlayer(peerId, { isSharingScreen: false });
     },
     [updatePlayer]
+  );
+
+  const attachRemoteScreen = useCallback(
+    (peerId: string, stream: MediaStream) => {
+      const remote = remotesRef.current.get(peerId);
+      if (!remote) return;
+      if (!mediaStreamIsDisplayable(stream)) return;
+      remote.info = { ...remote.info, isSharingScreen: true };
+      const peerName = remote.info.name || "???";
+      setRemoteScreen({ peerId, name: peerName, stream });
+
+      const onStreamUnavailable = () => {
+        if (!mediaStreamIsDisplayable(stream)) {
+          clearRemoteScreen(peerId);
+        }
+      };
+      stream.getVideoTracks().forEach((track) => {
+        track.addEventListener("ended", onStreamUnavailable);
+        track.addEventListener("mute", onStreamUnavailable);
+      });
+      stream.addEventListener("inactive", onStreamUnavailable);
+
+      updatePlayer(peerId, { isSharingScreen: true });
+    },
+    [updatePlayer, clearRemoteScreen]
   );
 
   const removePlayer = useCallback((peerId: string) => {
@@ -375,7 +403,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       const requestScreenAgain = () => {
         const current = remotesRef.current.get(remoteId);
         if (!current?.info.isSharingScreen) return;
-        if (current.screenCall && callHasLiveVideo(current.screenCall)) return;
+        if (current.screenCall && callHasDisplayableVideo(current.screenCall)) return;
         const conn = current.conn;
         if (conn?.open) {
           conn.send({ type: "need-screen" } satisfies SignalingMessage);
@@ -444,13 +472,25 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       peers.forEach((p) => {
         if (p.id === myIdRef.current) return;
         const existing = remotesRef.current.get(p.id);
-        if (!existing) {
-          remotesRef.current.set(p.id, { info: p });
-        } else {
-          existing.info = { ...existing.info, ...p };
+        let isSharingScreen = Boolean(p.isSharingScreen);
+        if (isSharingScreen) {
+          const screenCall = existing?.screenCall;
+          const showing = remoteScreenRef.current;
+          const showingRemote =
+            showing?.peerId === p.id &&
+            mediaStreamIsDisplayable(showing.stream);
+          if (!callHasDisplayableVideo(screenCall) && !showingRemote) {
+            isSharingScreen = false;
+          }
         }
-        updatePlayer(p.id, { ...p, disconnected: false });
-        if (!p.isSharingScreen) {
+        const merged: PeerInfo = { ...p, isSharingScreen };
+        if (!existing) {
+          remotesRef.current.set(p.id, { info: merged });
+        } else {
+          existing.info = { ...existing.info, ...merged };
+        }
+        updatePlayer(p.id, { ...merged, disconnected: false });
+        if (!isSharingScreen) {
           clearRemoteScreen(p.id);
         }
         connectToPeerRef.current(p.id);
@@ -818,6 +858,17 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   }, []);
 
   const stopScreenShare = useCallback(() => {
+    const me = myIdRef.current;
+    if (me) {
+      updatePlayer(me, { isSharingScreen: false });
+      broadcast({
+        type: "screen-share",
+        peerId: me,
+        isSharing: false,
+      });
+    }
+    flushVoicePresenceRef.current();
+
     screenStreamRef.current?.getTracks().forEach((t) => t.stop());
     screenStreamRef.current = null;
 
@@ -828,14 +879,6 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
     setIsSharing(false);
     setLocalScreen(null);
-    if (myIdRef.current) {
-      broadcast({
-        type: "screen-share",
-        peerId: myIdRef.current,
-        isSharing: false,
-      });
-      updatePlayer(myIdRef.current, { isSharingScreen: false });
-    }
   }, [broadcast, updatePlayer]);
 
   const startScreenShare = useCallback(async () => {
@@ -867,6 +910,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         });
         updatePlayer(myIdRef.current, { isSharingScreen: true });
       }
+      flushVoicePresenceRef.current();
     } catch {
       setError(
         "ไม่สามารถแชร์หน้าจอได้ — กรุณาอนุญาตการแชร์หน้าจอ / Screen share denied. Please allow screen sharing."
@@ -1344,6 +1388,16 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
     function startMeshPresence() {
       stopVoicePresenceRef.current();
+      roomSessionRef.current = roomSession;
+      flushVoicePresenceRef.current = () => {
+        if (!myIdRef.current) return;
+        flushVoicePresence(roomId, roomSession, {
+          peerId: myIdRef.current,
+          name: nameRef.current,
+          color: myColorRef.current,
+          isSharingScreen: Boolean(screenStreamRef.current),
+        });
+      };
       const presence = startVoicePresence(
         roomId,
         roomSession,
@@ -1512,6 +1566,20 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   }, [enabled, isSharing, startScreenCallToPeer]);
 
   useEffect(() => {
+    if (!remoteScreen) return;
+    const { peerId, stream } = remoteScreen;
+    const tick = () => {
+      const remote = remotesRef.current.get(peerId);
+      if (!mediaStreamIsDisplayable(stream) || !remote?.info.isSharingScreen) {
+        clearRemoteScreen(peerId);
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 300);
+    return () => window.clearInterval(id);
+  }, [remoteScreen, clearRemoteScreen]);
+
+  useEffect(() => {
     if (!enabled || !connected) return;
     const id = window.setInterval(() => {
       const me = myIdRef.current;
@@ -1525,10 +1593,14 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           return;
         }
         const screenCall = remotesRef.current.get(p.id)?.screenCall;
-        if (remoteScreen?.peerId === p.id && callHasLiveVideo(screenCall)) {
+        if (
+          remoteScreen?.peerId === p.id &&
+          (callHasDisplayableVideo(screenCall) ||
+            mediaStreamIsDisplayable(remoteScreen.stream))
+        ) {
           return;
         }
-        if (remoteScreen?.peerId === p.id && !callHasLiveVideo(screenCall)) {
+        if (remoteScreen?.peerId === p.id) {
           clearRemoteScreen(p.id);
         }
         const conn = remotesRef.current.get(p.id)?.conn;
