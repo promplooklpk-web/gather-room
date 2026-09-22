@@ -38,7 +38,7 @@ export function FloatingControlBar({
   unreadCount = 0,
 }: FloatingControlBarProps) {
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4">
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-safe-4 pb-safe-4">
       <div className="pointer-events-auto flex items-center gap-2 rounded-[28px] bg-[#111214]/95 px-3 py-2 shadow-2xl ring-1 ring-white/10">
         {needsAudioUnlock && onUnlockAudio && (
           <button

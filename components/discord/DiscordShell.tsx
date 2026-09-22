@@ -186,7 +186,7 @@ function VoiceRoomSession({
             className="fixed inset-0 bg-black/60 backdrop-blur-sm"
             onClick={() => setIsMobileSidebarOpen(false)}
           />
-          <div className="relative z-50 flex h-full shadow-2xl">
+          <div className="relative z-50 flex h-full pt-safe shadow-2xl">
             <ServerRail />
             <ChannelSidebar {...sidebarProps} />
           </div>
@@ -197,13 +197,13 @@ function VoiceRoomSession({
       <div className="flex min-w-0 flex-1 overflow-hidden bg-[#313338]">
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Header */}
-          <header className="flex h-12 shrink-0 items-center justify-between border-b border-[#1f2023] px-3 shadow-sm md:px-4">
-            <div className="flex items-center gap-2 truncate">
+          <header className="flex min-h-12 shrink-0 items-center justify-between border-b border-[#1f2023] px-safe-3 pt-safe shadow-sm md:px-safe-4">
+            <div className="flex min-w-0 items-center gap-2 truncate">
               {/* Hamburger button on mobile */}
               <button
                 type="button"
                 onClick={() => setIsMobileSidebarOpen(true)}
-                className="rounded p-1.5 text-[#b5bac1] hover:bg-[#35373c] hover:text-white md:hidden"
+                className="-ml-1 flex h-11 w-11 shrink-0 items-center justify-center rounded text-[#b5bac1] hover:bg-[#35373c] hover:text-white md:hidden"
                 aria-label="Open channels"
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none">
@@ -237,7 +237,7 @@ function VoiceRoomSession({
               <button
                 type="button"
                 onClick={handleToggleChat}
-                className={`relative flex items-center justify-center rounded p-1.5 transition ${
+                className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded transition ${
                   isChatOpen
                     ? "bg-[#35373c] text-white"
                     : "text-[#b5bac1] hover:bg-[#35373c] hover:text-white"
@@ -345,7 +345,7 @@ export function DiscordShell({ userName, onLogout }: DiscordShellProps) {
   };
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-[#1e1f22] text-[#dbdee1]">
+    <div className="flex h-dvh w-full overflow-hidden bg-[#1e1f22] text-[#dbdee1]">
       <VoiceRoomSession
         key={activeRoomId}
         userName={userName}
