@@ -1,5 +1,6 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { getPeerRealm, VOICE_ROOMS } from "@/lib/rooms";
+import { isOccupancyPeerId } from "@/lib/voicePeerIds";
 import { getSupabaseClient } from "@/lib/supabaseClient";
 
 const LOG_PREFIX = "[all-rooms-presence]";
@@ -52,6 +53,7 @@ function rowsToOccupancy(
 
   for (const row of rows) {
     if (!row.room_id || !row.peer_id) continue;
+    if (!isOccupancyPeerId(row.peer_id, row.room_id)) continue;
     const key = `${row.room_id}\0${row.peer_id}`;
     const prev = latestByRoomPeer.get(key);
     if (!prev || row.updated_at > prev.updated_at) {

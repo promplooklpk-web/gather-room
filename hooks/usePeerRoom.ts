@@ -47,7 +47,8 @@ import {
   getShareUrl as buildShareUrl,
 } from "@/lib/rooms";
 import { isPresenceDiscoveryEnabled } from "@/lib/supabaseClient";
-import { flushVoicePresence, startVoicePresence } from "@/lib/voicePresence";
+import { flushVoicePresence, purgeVoicePeer, startVoicePresence } from "@/lib/voicePresence";
+import { isDialableMeshPeerId } from "@/lib/voicePeerIds";
 import { useDebouncedConnectionStatus } from "@/hooks/useDebouncedConnectionStatus";
 import type {
   ChatMessage,
@@ -71,6 +72,8 @@ const PEER_LEAVE_GRACE_MS = 5_000;
 const STALE_PEER_MS = 8_000;
 const DATA_RECONNECT_DELAY_MS = 400;
 const STUCK_CONN_MS = 2000;
+/** After peer-unavailable, stop redialing this id (Supabase purge runs in parallel). */
+const UNREACHABLE_PEER_BACKOFF_MS = 120_000;
 
 function isConnInFlight(conn?: DataConnection, startedAt?: number) {
   if (!conn) return false;
@@ -184,6 +187,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   const stopHostTakeoverProbeRef = useRef<() => void>(() => {});
   const forceRelayRef = useRef(false);
   const switchingRelayRef = useRef(false);
+  const skippedPeerUntilRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     nameRef.current = name;
@@ -479,9 +483,24 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
   const applyRemotePeers = useCallback(
     (peers: PeerInfo[], authoritative = false) => {
+      const session = roomSessionRef.current;
+      const now = Date.now();
       const ids = new Set(peers.map((p) => p.id));
       peers.forEach((p) => {
         if (p.id === myIdRef.current) return;
+        const skipUntil = skippedPeerUntilRef.current.get(p.id);
+        if (skipUntil != null) {
+          if (skipUntil > now) return;
+          skippedPeerUntilRef.current.delete(p.id);
+        }
+        if (
+          session &&
+          presenceModeRef.current &&
+          !isDialableMeshPeerId(p.id, roomId, session)
+        ) {
+          void purgeVoicePeer(roomId, session, p.id);
+          return;
+        }
         const existing = remotesRef.current.get(p.id);
         let isSharingScreen = Boolean(p.isSharingScreen);
         if (isSharingScreen) {
@@ -515,7 +534,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         });
       }
     },
-    [updatePlayer, removePlayer, clearRemoteScreen]
+    [roomId, updatePlayer, removePlayer, clearRemoteScreen]
   );
 
   const requestScreenFrom = useCallback((peerId: string) => {
@@ -854,6 +873,21 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   const connectToPeer = useCallback(
     (remoteId: string) => {
       if (!peerRef.current || remoteId === myIdRef.current) return;
+      const session = roomSessionRef.current;
+      const now = Date.now();
+      const skipUntil = skippedPeerUntilRef.current.get(remoteId);
+      if (skipUntil != null) {
+        if (skipUntil > now) return;
+        skippedPeerUntilRef.current.delete(remoteId);
+      }
+      if (
+        session &&
+        presenceModeRef.current &&
+        remoteId !== roomHostIdRef.current &&
+        !isDialableMeshPeerId(remoteId, roomId, session)
+      ) {
+        return;
+      }
       const peer = peerRef.current;
       const remote = remotesRef.current.get(remoteId);
 
@@ -876,7 +910,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         startScreenCallToPeer(remoteId, true);
       }
     },
-    [setupDataConnection, setupAudioCall, startScreenCallToPeer]
+    [roomId, setupDataConnection, setupAudioCall, startScreenCallToPeer]
   );
 
   const announceJoin = useCallback((peerId: string) => {
@@ -1163,6 +1197,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     const presenceMode = isPresenceDiscoveryEnabled();
     presenceModeRef.current = presenceMode;
     roomHostIdRef.current = getRoomHostId(roomId, roomSession);
+    roomSessionRef.current = roomSession;
     const roomHostId = roomHostIdRef.current;
     forceRelayRef.current = false;
     switchingRelayRef.current = false;
@@ -1229,8 +1264,20 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         console.error("Peer error:", err);
         const missing = unavailablePeerId(err);
         if (missing) {
+          skippedPeerUntilRef.current.set(
+            missing,
+            Date.now() + UNREACHABLE_PEER_BACKOFF_MS
+          );
+          const purgeSession = roomSessionRef.current;
+          if (purgeSession) {
+            void purgeVoicePeer(roomId, purgeSession, missing);
+          }
           removePlayerRef.current(missing);
-          if (missing === roomHostId && !isHostRef.current) {
+          if (
+            missing === roomHostId &&
+            !isHostRef.current &&
+            !presenceModeRef.current
+          ) {
             hostMissCountRef.current += 1;
             if (
               hostMissCountRef.current >= HOST_PEER_UNAVAILABLE_TAKEOVER &&
@@ -1494,6 +1541,14 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         (channelStatus) => {
           if (destroyed) return;
           setPresenceSyncStatus(channelStatus);
+          if (
+            channelStatus === "connected" &&
+            presenceModeRef.current &&
+            !isHostRef.current &&
+            peerRef.current?.id
+          ) {
+            markGuestConnectedRef.current();
+          }
         }
       );
       stopVoicePresenceRef.current = presence?.stop ?? (() => {});
@@ -1860,6 +1915,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   const getShareUrl = useCallback(() => buildShareUrl(roomId), [roomId]);
 
   const retryConnection = useCallback(() => {
+    skippedPeerUntilRef.current.clear();
     setError(null);
     setConnectingStuck(false);
     setPresenceSyncStatus("idle");

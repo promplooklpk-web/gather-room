@@ -1,13 +1,14 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { getPeerRealm } from "@/lib/rooms";
 import { getSupabaseClient } from "@/lib/supabaseClient";
+import { isDialableMeshPeerId } from "@/lib/voicePeerIds";
 import type { PeerInfo, PresenceSyncStatus } from "@/lib/types";
 
 const LOG_PREFIX = "[voice-peers]";
 const HEARTBEAT_MS = 3000;
 /** Poll even when Realtime postgres_changes is delayed or filtered incorrectly. */
 const POLL_SYNC_MS = 4000;
-const STALE_PEER_MS = 45_000;
+const STALE_PEER_MS = 30_000;
 
 export interface VoicePresencePayload {
   peerId: string;
@@ -46,6 +47,10 @@ async function fetchActivePeers(
   const peers: PeerInfo[] = [];
   for (const row of data ?? []) {
     if (!row.peer_id || row.peer_id === selfPeerId) continue;
+    if (!isDialableMeshPeerId(row.peer_id, roomId, session)) {
+      void purgeVoicePeer(roomId, session, row.peer_id);
+      continue;
+    }
     peers.push({
       id: row.peer_id,
       name: row.name || "???",
@@ -54,6 +59,27 @@ async function fetchActivePeers(
     });
   }
   return peers;
+}
+
+/** Remove ghost / legacy rows so other clients stop dialing dead PeerJS ids. */
+export async function purgeVoicePeer(
+  roomId: string,
+  session: string,
+  peerId: string
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+  const { error } = await supabase
+    .from("voice_peers")
+    .delete()
+    .eq("room_id", roomId)
+    .eq("session_id", session)
+    .eq("peer_id", peerId);
+  if (error) {
+    console.warn(LOG_PREFIX, "purge error", peerId, error.message);
+  } else {
+    console.info(LOG_PREFIX, "purged", peerId);
+  }
 }
 
 /** Push sharing flag to Postgres immediately (do not wait for heartbeat). */
