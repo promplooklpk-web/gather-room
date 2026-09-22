@@ -140,6 +140,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     () => {}
   );
   const setupDataConnectionRef = useRef<(conn: DataConnection) => void>(() => {});
+  const setupScreenReceiveCallRef = useRef<(call: MediaConnection) => void>(() => {});
   const stopHostConnectRetryRef = useRef<() => void>(() => {});
   const startHostConnectRetryRef = useRef<() => void>(() => {});
   const tryTakeoverRef = useRef<() => void>(() => {});
@@ -196,11 +197,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   const attachRemoteScreen = useCallback(
     (peerId: string, stream: MediaStream) => {
       const remote = remotesRef.current.get(peerId);
-      const peerName = remote?.info.name || players[peerId]?.name || "???";
+      const peerName = remote?.info.name || "???";
       setRemoteScreen({ peerId, name: peerName, stream });
       updatePlayer(peerId, { isSharingScreen: true });
     },
-    [players, updatePlayer]
+    [updatePlayer]
   );
 
   const clearRemoteScreen = useCallback(
@@ -812,6 +813,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
   useEffect(() => {
     setupDataConnectionRef.current = setupDataConnection;
+    setupScreenReceiveCallRef.current = setupScreenReceiveCall;
     connectToPeerRef.current = connectToPeer;
     stopScreenShareRef.current = stopScreenShare;
     startScreenCallToPeerRef.current = startScreenCallToPeer;
@@ -951,7 +953,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
         if (meta?.type === "screen") {
           call.answer(new MediaStream());
-          setupScreenReceiveCall(call);
+          setupScreenReceiveCallRef.current(call);
           return;
         }
 
@@ -1242,7 +1244,6 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     retryNonce,
     announceJoin,
     setupAudioCall,
-    setupScreenReceiveCall,
     startHostConnectRetry,
     stopHostConnectRetry,
     broadcast,
