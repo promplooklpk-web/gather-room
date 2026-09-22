@@ -8,6 +8,7 @@ import { ChannelSidebar } from "@/components/discord/ChannelSidebar";
 import { FloatingControlBar } from "@/components/discord/FloatingControlBar";
 import { ScreenStage } from "@/components/discord/VoiceStage";
 import { ConnectionStrip } from "@/components/discord/ConnectionStrip";
+import { shouldShowConnectionBanner } from "@/components/discord/connectionStatusUi";
 import { ChatPanel } from "@/components/discord/ChatPanel";
 import { SettingsModal } from "@/components/discord/SettingsModal";
 import { t } from "@/lib/i18n";
@@ -135,6 +136,11 @@ function VoiceRoomSession({
 
   const roomLabel = `${room.labelTh} / ${room.label}`;
   const userColor = myPlayer?.color ?? "#5865f2";
+  const showConnectionBanner = shouldShowConnectionBanner(
+    connectionStatus,
+    presenceSyncStatus,
+    connectingStuck
+  );
 
   const sidebarProps = {
     rooms,
@@ -196,80 +202,99 @@ function VoiceRoomSession({
       {/* Main Content Pane */}
       <div className="flex min-w-0 flex-1 overflow-hidden bg-[#313338]">
         <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Header */}
-          <header className="flex min-h-12 shrink-0 items-center justify-between border-b border-[#1f2023] px-safe-3 pt-safe shadow-sm md:px-safe-4">
-            <div className="flex min-w-0 items-center gap-2 truncate">
-              {/* Hamburger button on mobile */}
-              <button
-                type="button"
-                onClick={() => setIsMobileSidebarOpen(true)}
-                className="-ml-1 flex h-11 w-11 shrink-0 items-center justify-center rounded text-[#b5bac1] hover:bg-[#35373c] hover:text-white md:hidden"
-                aria-label="Open channels"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none">
-                  <line x1="3" y1="12" x2="21" y2="12" />
-                  <line x1="3" y1="6" x2="21" y2="6" />
-                  <line x1="3" y1="18" x2="21" y2="18" />
-                </svg>
-              </button>
+          <div className="relative z-10 flex shrink-0 flex-col bg-[#313338] pt-safe">
+            <header
+              className={`flex min-h-12 shrink-0 items-center justify-between gap-2 px-safe-3 md:px-safe-4 ${
+                showConnectionBanner ? "" : "border-b border-[#1f2023] shadow-sm"
+              }`}
+            >
+              <div className="flex min-w-0 items-center gap-2 truncate">
+                <button
+                  type="button"
+                  onClick={() => setIsMobileSidebarOpen(true)}
+                  className="-ml-1 flex h-11 w-11 shrink-0 items-center justify-center rounded text-[#b5bac1] hover:bg-[#35373c] hover:text-white md:hidden"
+                  aria-label="Open channels"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none">
+                    <line x1="3" y1="12" x2="21" y2="12" />
+                    <line x1="3" y1="6" x2="21" y2="6" />
+                    <line x1="3" y1="18" x2="21" y2="18" />
+                  </svg>
+                </button>
 
-              <span className="text-[#949ba4]">🔊</span>
-              <h2 className="truncate text-[15px] font-semibold text-white">
-                {roomLabel}
-              </h2>
-              {connectionStatus === "connected" && (
-                <span className="hidden rounded bg-[#23a559]/20 px-2 py-0.5 text-[11px] font-semibold text-[#23a559] sm:inline-block">
-                  {t.live}
-                </span>
-              )}
-            </div>
+                <span className="shrink-0 text-[#949ba4]">🔊</span>
+                <h2 className="truncate text-[15px] font-semibold text-white">
+                  {roomLabel}
+                </h2>
+                {connectionStatus === "connected" && !showConnectionBanner && (
+                  <>
+                    <span className="hidden rounded bg-[#23a559]/20 px-2 py-0.5 text-[11px] font-semibold text-[#23a559] sm:inline-block">
+                      {t.live}
+                    </span>
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full bg-[#23a559] sm:hidden"
+                      title={t.live}
+                      aria-hidden
+                    />
+                  </>
+                )}
+              </div>
 
-            <div className="flex items-center gap-2">
+              <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+                {!showConnectionBanner && (
+                  <ConnectionStrip
+                    layout="inline"
+                    className="hidden md:flex"
+                    status={connectionStatus}
+                    quality={connectionQuality}
+                    presenceSyncStatus={presenceSyncStatus}
+                    connectingStuck={connectingStuck}
+                    onRetry={retryConnection}
+                  />
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleToggleChat}
+                  className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded transition ${
+                    isChatOpen
+                      ? "bg-[#35373c] text-white"
+                      : "text-[#b5bac1] hover:bg-[#35373c] hover:text-white"
+                  }`}
+                  title={isChatOpen ? t.chat : t.chatTitle}
+                  aria-label={isChatOpen ? t.chat : t.chatTitle}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z" />
+                  </svg>
+                  {unreadCount > 0 && !isChatOpen && (
+                    <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#ed4245] px-1 text-[10px] font-bold text-white shadow">
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </header>
+
+            {showConnectionBanner && (
               <ConnectionStrip
+                layout="banner"
                 status={connectionStatus}
                 quality={connectionQuality}
                 presenceSyncStatus={presenceSyncStatus}
                 connectingStuck={connectingStuck}
                 onRetry={retryConnection}
               />
+            )}
 
-              {/* Chat Toggle Button */}
-              <button
-                type="button"
-                onClick={handleToggleChat}
-                className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded transition ${
-                  isChatOpen
-                    ? "bg-[#35373c] text-white"
-                    : "text-[#b5bac1] hover:bg-[#35373c] hover:text-white"
-                }`}
-                title={isChatOpen ? t.chat : t.chatTitle}
-                aria-label={isChatOpen ? t.chat : t.chatTitle}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z" />
-                </svg>
-                {unreadCount > 0 && !isChatOpen && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#ed4245] px-1 text-[10px] font-bold text-white shadow">
-                    {unreadCount > 9 ? "9+" : unreadCount}
-                  </span>
-                )}
-              </button>
-            </div>
-          </header>
-
-          {connectingStuck &&
-            (connectionStatus === "connecting" ||
-              connectionStatus === "reconnecting") && (
-            <div className="mx-3 mt-2 rounded border border-[#f0b232]/30 bg-[#f0b232]/10 px-3 py-2 text-[12px] text-[#faa61a] sm:hidden">
-              {t.stuckConnectingHint}
-            </div>
-          )}
-
-          {error && (
-            <div className="mx-4 mt-3 rounded border border-[#ed4245]/40 bg-[#ed4245]/15 px-3 py-2 text-sm text-[#faa61a]">
-              {error}
-            </div>
-          )}
+            {error && (
+              <div className="shrink-0 border-b border-[#1f2023] px-safe-3 py-2 md:px-safe-4">
+                <div className="rounded border border-[#ed4245]/40 bg-[#ed4245]/15 px-3 py-2 text-sm text-[#faa61a]">
+                  {error}
+                </div>
+              </div>
+            )}
+          </div>
 
           <ScreenStage
             players={players}

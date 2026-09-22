@@ -276,7 +276,7 @@ export function ScreenStage({
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div
-          className={`flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-safe-3 pb-stage-controls pt-3 md:px-6 md:pb-stage-controls md:pt-6 ${
+          className={`relative z-0 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-safe-3 pb-stage-controls pt-3 md:px-6 md:pt-6 ${
             waitingAlone ? "items-center justify-center" : "items-stretch justify-start md:items-center md:justify-center"
           }`}
         >

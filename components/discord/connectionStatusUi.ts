@@ -43,6 +43,18 @@ export function shouldOfferReconnect(
   return false;
 }
 
+/** Full-width banner below header (reserves layout space, avoids overlapping stage). */
+export function shouldShowConnectionBanner(
+  status: ConnectionStatus,
+  presence: PresenceSyncStatus,
+  connectingStuck: boolean
+): boolean {
+  if (status !== "connected") return true;
+  if (presence !== "idle") return true;
+  if (connectingStuck) return true;
+  return false;
+}
+
 export function connectionStatusLabel(status: ConnectionStatus) {
   return voiceConnectionLabel(status);
 }
