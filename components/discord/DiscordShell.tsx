@@ -193,7 +193,7 @@ function VoiceRoomSession({
       <div className="flex min-w-0 flex-1 overflow-hidden bg-[#313338]">
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Header */}
-          <header className="flex min-h-12 shrink-0 items-center justify-between border-b border-[#1f2023] px-3 pt-safe shadow-sm md:px-4">
+          <header className="flex min-h-12 shrink-0 items-center justify-between border-b border-[#1f2023] px-safe-3 pt-safe shadow-sm md:px-safe-4">
             <div className="flex min-w-0 items-center gap-2 truncate">
               {/* Hamburger button on mobile */}
               <button
