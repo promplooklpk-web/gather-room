@@ -26,6 +26,9 @@ jobs:
 
       - run: npm ci
       - run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://kxbeofqiahloeqkillvy.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt4YmVvZnFpYWhsb2Vxa2lsbHZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5Njg3MjUsImV4cCI6MjEwNDU0NDcyNX0.t8ro7wZ2cQBchfVOpemPE3oe1miLBtl21KroELR6pqA
 
       - uses: actions/upload-pages-artifact@v3
         with:

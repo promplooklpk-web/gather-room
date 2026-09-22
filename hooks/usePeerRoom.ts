@@ -43,6 +43,8 @@ import {
   getRoomHostId,
   getShareUrl as buildShareUrl,
 } from "@/lib/rooms";
+import { isPresenceDiscoveryEnabled } from "@/lib/supabaseClient";
+import { startVoicePresence } from "@/lib/voicePresence";
 import type {
   ChatMessage,
   ConnectionQuality,
@@ -159,6 +161,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   const hostTakeoverTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hostMissCountRef = useRef(0);
   const takeoverInFlightRef = useRef(false);
+  const presenceModeRef = useRef(false);
+  const stopVoicePresenceRef = useRef<() => void>(() => {});
   const markGuestConnectedRef = useRef<() => void>(() => {});
   const startHostTakeoverProbeRef = useRef<() => void>(() => {});
   const stopHostTakeoverProbeRef = useRef<() => void>(() => {});
@@ -511,7 +515,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
               } satisfies SignalingMessage);
             }
           }
-          if (isHostRef.current && myIdRef.current) {
+          if (myIdRef.current && (isHostRef.current || presenceModeRef.current)) {
             const roster = collectRoster();
             if (firstHello) {
               broadcast({ type: "peer-joined", peer: msg.peer });
@@ -519,7 +523,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
             broadcast({
               type: "roster",
               peers: roster,
-              hostId: myIdRef.current,
+              hostId: hostIdRef.current ?? myIdRef.current,
             });
           }
           break;
@@ -1020,6 +1024,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     const remotes = remotesRef.current;
     const roomSession = ensureRoomSession(roomId);
     const guestScope = getGuestScope(roomId, roomSession);
+    const presenceMode = isPresenceDiscoveryEnabled();
+    presenceModeRef.current = presenceMode;
     roomHostIdRef.current = getRoomHostId(roomId, roomSession);
     const roomHostId = roomHostIdRef.current;
     forceRelayRef.current = false;
@@ -1166,10 +1172,22 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         }
       } else {
         setConnected(true);
-        setConnectionStatus("connecting");
-        connectToPeerRef.current(roomHostId);
-        startHostConnectRetryRef.current();
-        startHostTakeoverProbeRef.current();
+        hostIdRef.current = myIdRef.current;
+        if (presenceMode) {
+          stopHostConnectRetryRef.current();
+          stopHostTakeoverProbeRef.current();
+          setConnectionStatus("connecting");
+          startMeshPresence();
+          if (!hasPlayedJoinSoundRef.current) {
+            hasPlayedJoinSoundRef.current = true;
+            playJoinSound();
+          }
+        } else {
+          setConnectionStatus("connecting");
+          connectToPeerRef.current(roomHostId);
+          startHostConnectRetryRef.current();
+          startHostTakeoverProbeRef.current();
+        }
       }
     }
 
@@ -1295,13 +1313,39 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       relayTimer = setTimeout(() => {
         switchingRelayRef.current = false;
         if (destroyed) return;
-        if (wasHost) openHostPeer();
+        if (wasHost && !presenceMode) openHostPeer();
         else openGuestPeer();
       }, RELAY_RECREATE_DELAY_MS);
     }
 
     tryTakeoverRef.current = tryTakeoverHost;
     switchToRelayRef.current = switchToRelayAndRejoin;
+
+    function startMeshPresence() {
+      stopVoicePresenceRef.current();
+      const presence = startVoicePresence(
+        roomId,
+        roomSession,
+        () => {
+          if (!myIdRef.current) return null;
+          return {
+            peerId: myIdRef.current,
+            name: nameRef.current,
+            color: myColorRef.current,
+            isSharingScreen: Boolean(screenStreamRef.current),
+          };
+        },
+        (peers) => {
+          if (destroyed) return;
+          applyRemotePeers(peers, false);
+          setConnectionStatus("connected");
+          setError((prev) =>
+            prev?.startsWith("เชื่อมต่อไม่สำเร็จ") ? null : prev
+          );
+        }
+      );
+      stopVoicePresenceRef.current = presence?.stop ?? (() => {});
+    }
 
     function announceLeave() {
       const me = myIdRef.current;
@@ -1360,7 +1404,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       })
       .finally(() => {
         if (destroyed) return;
-        if (isIosDevice() && !reclaimHostId) openGuestPeer();
+        if (presenceMode) openGuestPeer();
+        else if (isIosDevice() && !reclaimHostId) openGuestPeer();
         else openHostPeer();
       });
 
@@ -1370,6 +1415,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       window.removeEventListener("pagehide", announceLeave);
       window.removeEventListener("beforeunload", announceLeave);
       if (relayTimer) clearTimeout(relayTimer);
+      stopVoicePresenceRef.current();
       stopHostConnectRetry();
       stopHostTakeoverProbe();
       announceLeave();
