@@ -49,6 +49,8 @@ function VoiceRoomSession({
     connected,
     connectionStatus,
     connectionQuality,
+    presenceSyncStatus,
+    connectingStuck,
     error,
     isMuted,
     isSharing,
@@ -144,6 +146,8 @@ function VoiceRoomSession({
     connected,
     connectionStatus,
     connectionQuality,
+    presenceSyncStatus,
+    connectingStuck,
     isMuted,
     isDeafened,
     isSharing,
@@ -224,6 +228,8 @@ function VoiceRoomSession({
               <ConnectionStrip
                 status={connectionStatus}
                 quality={connectionQuality}
+                presenceSyncStatus={presenceSyncStatus}
+                connectingStuck={connectingStuck}
                 onRetry={retryConnection}
               />
 
@@ -250,6 +256,14 @@ function VoiceRoomSession({
               </button>
             </div>
           </header>
+
+          {connectingStuck &&
+            (connectionStatus === "connecting" ||
+              connectionStatus === "reconnecting") && (
+            <div className="mx-3 mt-2 rounded border border-[#f0b232]/30 bg-[#f0b232]/10 px-3 py-2 text-[12px] text-[#faa61a] sm:hidden">
+              {t.stuckConnectingHint}
+            </div>
+          )}
 
           {error && (
             <div className="mx-4 mt-3 rounded border border-[#ed4245]/40 bg-[#ed4245]/15 px-3 py-2 text-sm text-[#faa61a]">

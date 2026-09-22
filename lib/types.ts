@@ -1,4 +1,16 @@
-export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "failed";
+export type ConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "disconnected"
+  | "failed";
+
+/** Supabase voice_peers Realtime channel (roster discovery). */
+export type PresenceSyncStatus =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "error";
 export type ConnectionQuality = "good" | "fair" | "poor" | "relay";
 
 export interface PlayerState {
