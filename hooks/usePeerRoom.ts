@@ -37,7 +37,12 @@ import {
   playMessageSound,
 } from "@/lib/soundEffects";
 import { pickColor } from "@/lib/colors";
-import { getRoomHostId, getShareUrl as buildShareUrl } from "@/lib/rooms";
+import {
+  ensureRoomSession,
+  getGuestScope,
+  getRoomHostId,
+  getShareUrl as buildShareUrl,
+} from "@/lib/rooms";
 import type {
   ChatMessage,
   ConnectionQuality,
@@ -99,7 +104,7 @@ interface UsePeerRoomOptions {
 }
 
 export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
-  const roomHostIdRef = useRef(getRoomHostId(roomId));
+  const roomHostIdRef = useRef("");
   const [myId, setMyId] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(false);
   const [players, setPlayers] = useState<Record<string, PlayerState>>({});
@@ -1013,7 +1018,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
     let destroyed = false;
     const remotes = remotesRef.current;
-    roomHostIdRef.current = getRoomHostId(roomId);
+    const roomSession = ensureRoomSession(roomId);
+    const guestScope = getGuestScope(roomId, roomSession);
+    roomHostIdRef.current = getRoomHostId(roomId, roomSession);
     const roomHostId = roomHostIdRef.current;
     forceRelayRef.current = false;
     switchingRelayRef.current = false;
@@ -1095,7 +1102,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
 
         if (err.type === "unavailable-id") {
           if (!isHostRef.current) {
-            rotateGuestPeerId(roomId);
+            rotateGuestPeerId(roomId, guestScope);
             openGuestPeer();
           }
           return;
@@ -1170,7 +1177,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       if (destroyed) return;
       session += 1;
       const currentSession = session;
-      const guestId = makeGuestPeerId(roomId);
+      const guestId = makeGuestPeerId(roomId, guestScope);
       const guestPeer = new Peer(guestId, peerOptions());
 
       guestPeer.on("open", () => {
@@ -1184,7 +1191,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       guestPeer.on("error", (err) => {
         if (destroyed || session !== currentSession) return;
         if (err.type === "unavailable-id") {
-          rotateGuestPeerId(roomId);
+          rotateGuestPeerId(roomId, guestScope);
           openGuestPeer();
         }
       });

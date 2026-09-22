@@ -242,34 +242,36 @@ export function isTransientPeerError(err: PeerError<string>): boolean {
   ].includes(err.type);
 }
 
-function guestIdStorageKey(roomId: string) {
-  return `mtlclick-guest-id:${roomId}`;
+function guestIdStorageKey(scope: string) {
+  return `mtlclick-guest-id:${scope}`;
 }
 
-function randomGuestPeerId(roomId: string) {
-  return `mtlclick-${roomId}-${Math.random().toString(36).slice(2, 8)}`;
+function randomGuestPeerId(scope: string) {
+  return `mtlclick-${scope}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /** Stable per-tab guest id so a brief disconnect can rejoin the same mesh slot. */
-export function makeGuestPeerId(roomId: string): string {
-  if (typeof sessionStorage === "undefined") return randomGuestPeerId(roomId);
+export function makeGuestPeerId(roomId: string, guestScope?: string): string {
+  const scope = guestScope ?? roomId;
+  if (typeof sessionStorage === "undefined") return randomGuestPeerId(scope);
   try {
-    const key = guestIdStorageKey(roomId);
+    const key = guestIdStorageKey(scope);
     const existing = sessionStorage.getItem(key);
     if (existing) return existing;
-    const id = randomGuestPeerId(roomId);
+    const id = randomGuestPeerId(scope);
     sessionStorage.setItem(key, id);
     return id;
   } catch {
-    return randomGuestPeerId(roomId);
+    return randomGuestPeerId(scope);
   }
 }
 
-export function rotateGuestPeerId(roomId: string): string {
-  const id = randomGuestPeerId(roomId);
+export function rotateGuestPeerId(roomId: string, guestScope?: string): string {
+  const scope = guestScope ?? roomId;
+  const id = randomGuestPeerId(scope);
   if (typeof sessionStorage === "undefined") return id;
   try {
-    sessionStorage.setItem(guestIdStorageKey(roomId), id);
+    sessionStorage.setItem(guestIdStorageKey(scope), id);
   } catch {
     /* private mode / quota */
   }
