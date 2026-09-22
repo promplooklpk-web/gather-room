@@ -18,8 +18,6 @@ export const DEFAULT_ROOM_ID = VOICE_ROOMS[0].id;
 /** Query param that isolates PeerJS host ids per invite / voice session. */
 export const ROOM_SESSION_QUERY = "session";
 
-const SESSION_STORAGE_PREFIX = "mtlclick-session:";
-
 /** Prefix on PeerJS ids so we do not collide with unrelated apps on 0.peerjs.com. */
 export function getPeerRealm(): string {
   const fromEnv = process.env.NEXT_PUBLIC_PEER_REALM?.trim();
@@ -35,8 +33,12 @@ function randomRoomSession(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function sessionStorageKey(roomId: string): string {
-  return `${SESSION_STORAGE_PREFIX}${roomId}`;
+/**
+ * Default voice shard for a sidebar channel. Same for every client that picks this room
+ * without a custom ?session= (incognito + normal included).
+ */
+export function defaultChannelSession(roomId: string): string {
+  return `ch-${roomId}`;
 }
 
 /** Read session from ?session= or hash `roomId~session` (shareable across browser contexts). */
@@ -66,39 +68,20 @@ export function syncRoomSessionToUrl(roomId: string, session: string): void {
 }
 
 /**
- * Resolve the voice session for this room: URL (authoritative) → tab storage → new random id.
- * Always mirrors session into the URL so incognito + normal can share one link.
+ * Resolve the voice session for this room.
+ * - Explicit ?session= / hash wins (private sub-groups via invite link).
+ * - Otherwise use the shared channel shard so two browsers in Meeting N meet without copying a unique id.
  */
 export function ensureRoomSession(roomId: string): string {
   const fromUrl = readRoomSessionFromUrl();
-  if (fromUrl) {
-    try {
-      sessionStorage.setItem(sessionStorageKey(roomId), fromUrl);
-    } catch {
-      /* private mode */
-    }
-    syncRoomSessionToUrl(roomId, fromUrl);
-    return fromUrl;
-  }
+  const session = fromUrl ?? defaultChannelSession(roomId);
+  syncRoomSessionToUrl(roomId, session);
+  return session;
+}
 
-  if (typeof sessionStorage !== "undefined") {
-    try {
-      const stored = sessionStorage.getItem(sessionStorageKey(roomId));
-      if (stored && isValidRoomSession(stored)) {
-        syncRoomSessionToUrl(roomId, stored);
-        return stored;
-      }
-    } catch {
-      /* private mode */
-    }
-  }
-
+/** New random session for a private voice group; updates URL for copy-link. */
+export function rotatePrivateRoomSession(roomId: string): string {
   const session = randomRoomSession();
-  try {
-    sessionStorage.setItem(sessionStorageKey(roomId), session);
-  } catch {
-    /* private mode */
-  }
   syncRoomSessionToUrl(roomId, session);
   return session;
 }
