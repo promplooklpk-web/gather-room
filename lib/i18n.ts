@@ -48,6 +48,7 @@ export const t = {
   soundboard: "ซาวด์บอร์ด",
   fullscreen: "เต็มจอ",
   exitFullscreen: "ออกจากเต็มจอ",
+  exitScreenView: "ออกจากหน้าจอแชร์ / Exit screen view",
   noOneHere: "ยังไม่มีใครในห้องนี้",
   waitingForPeople: "รอเพื่อนเข้าร่วมช่องเสียง",
   openInSafari: "เปิดลิงก์นี้ใน Safari เพื่อคุยกับเครื่องอื่นได้",
