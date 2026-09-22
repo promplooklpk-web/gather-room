@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useAllRoomsOccupancy } from "@/hooks/useAllRoomsOccupancy";
 import { usePeerRoom } from "@/hooks/usePeerRoom";
 import { ServerRail } from "@/components/discord/ServerRail";
 import { ChannelSidebar } from "@/components/discord/ChannelSidebar";
@@ -68,6 +69,7 @@ function VoiceRoomSession({
     switchMicrophone,
     updateProfile,
   } = usePeerRoom({ name: userName, roomId, enabled: true });
+  const occupancyByRoom = useAllRoomsOccupancy(true);
 
   const [needsAudioUnlock, setNeedsAudioUnlock] = useState(
     () => typeof window !== "undefined" && "ontouchstart" in window
@@ -136,6 +138,7 @@ function VoiceRoomSession({
     rooms,
     activeRoomId: roomId,
     userPanelRoomLabel: room.label,
+    occupancyByRoom,
     players,
     myId,
     connected,

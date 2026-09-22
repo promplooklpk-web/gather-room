@@ -2,6 +2,7 @@
 
 import type { ConnectionQuality, ConnectionStatus, PlayerState } from "@/lib/types";
 import { t } from "@/lib/i18n";
+import type { RoomOccupancyMap } from "@/lib/allRoomsPresence";
 import type { VoiceRoom } from "@/lib/rooms";
 import { UserPanel } from "@/components/discord/UserPanel";
 import { initialFromName } from "@/lib/colors";
@@ -10,6 +11,7 @@ interface ChannelSidebarProps {
   rooms: VoiceRoom[];
   activeRoomId: string;
   userPanelRoomLabel: string;
+  occupancyByRoom: RoomOccupancyMap;
   players: PlayerState[];
   myId: string | null;
   connected: boolean;
@@ -32,10 +34,55 @@ interface ChannelSidebarProps {
   onOpenSettings?: () => void;
 }
 
+function memberList(
+  members: Array<{
+    id: string;
+    name: string;
+    color: string;
+    isSharingScreen?: boolean;
+    disconnected?: boolean;
+  }>,
+  myId: string | null,
+  speakingPeers: Record<string, boolean>
+) {
+  return members.map((p) => {
+    const isSpeaking = Boolean(speakingPeers[p.id]);
+    return (
+      <li
+        key={p.id}
+        className={`flex items-center gap-2 rounded px-1 py-0.5 text-sm text-[#dbdee1] ${
+          p.disconnected ? "opacity-50" : ""
+        }`}
+      >
+        <span
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white transition-all duration-150 ${
+            isSpeaking
+              ? "ring-2 ring-[#23a559] ring-offset-1 ring-offset-[#2b2d31]"
+              : ""
+          }`}
+          style={{ backgroundColor: p.color }}
+        >
+          {initialFromName(p.name)}
+        </span>
+        <span className="min-w-0 flex-1 truncate">
+          {p.name}
+          {p.id === myId ? ` ${t.you}` : ""}
+        </span>
+        {p.isSharingScreen && (
+          <span className="rounded bg-[#ed4245] px-1 py-px text-[9px] font-bold tracking-wide text-white">
+            {t.live}
+          </span>
+        )}
+      </li>
+    );
+  });
+}
+
 export function ChannelSidebar({
   rooms,
   activeRoomId,
   userPanelRoomLabel,
+  occupancyByRoom,
   players,
   myId,
   connected,
@@ -70,6 +117,16 @@ export function ChannelSidebar({
         <ul className="space-y-0.5">
           {rooms.map((room) => {
             const active = room.id === activeRoomId;
+            const otherOccupants = occupancyByRoom[room.id] ?? [];
+            const members = active
+              ? players
+              : otherOccupants.map((o) => ({
+                  id: o.peerId,
+                  name: o.name,
+                  color: o.color,
+                  isSharingScreen: o.isSharingScreen,
+                }));
+            const showMembers = active || members.length > 0;
             return (
               <li key={room.id}>
                 <button
@@ -85,40 +142,18 @@ export function ChannelSidebar({
                   <span className="flex-1 truncate">
                     {room.labelTh} / {room.label}
                   </span>
+                  {!active && members.length > 0 && (
+                    <span
+                      className="shrink-0 rounded-full bg-[#35373c] px-1.5 py-px text-[10px] font-semibold text-[#949ba4]"
+                      title={t.roomMemberCount.replace("{n}", String(members.length))}
+                    >
+                      {members.length}
+                    </span>
+                  )}
                 </button>
-                {active && (
+                {showMembers && (
                   <ul className="ml-6 mt-0.5 space-y-0.5">
-                    {players.map((p) => {
-                      const isSpeaking = Boolean(speakingPeers[p.id]);
-                      return (
-                        <li
-                          key={p.id}
-                          className={`flex items-center gap-2 rounded px-1 py-0.5 text-sm text-[#dbdee1] ${
-                            p.disconnected ? "opacity-50" : ""
-                          }`}
-                        >
-                          <span
-                            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white transition-all duration-150 ${
-                              isSpeaking
-                                ? "ring-2 ring-[#23a559] ring-offset-1 ring-offset-[#2b2d31]"
-                                : ""
-                            }`}
-                            style={{ backgroundColor: p.color }}
-                          >
-                            {initialFromName(p.name)}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate">
-                            {p.name}
-                            {p.id === myId ? ` ${t.you}` : ""}
-                          </span>
-                          {p.isSharingScreen && (
-                            <span className="rounded bg-[#ed4245] px-1 py-px text-[9px] font-bold tracking-wide text-white">
-                              {t.live}
-                            </span>
-                          )}
-                        </li>
-                      );
-                    })}
+                    {memberList(members, myId, active ? speakingPeers : {})}
                   </ul>
                 )}
               </li>

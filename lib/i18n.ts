@@ -6,6 +6,7 @@ export const t = {
   enterRoom: "เข้าร่วม / Join",
   nameRequired: "กรุณาใส่ชื่อ / Please enter your name",
   voiceChannels: "ช่องสำหรับพูด",
+  roomMemberCount: "{n} คน",
   mute: "ปิดไมค์",
   unmute: "เปิดไมค์",
   deafen: "ปิดหูฟัง",
