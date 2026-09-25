@@ -200,6 +200,8 @@ interface ScreenStageProps {
   userVolumes?: Record<string, number>;
   onSetUserVolume?: (peerId: string, volume: number) => void;
   onExitScreenStage?: () => void;
+  /** Sharer announced via signaling/presence but stage has no frames yet */
+  screenShareWaitPeerId?: string | null;
 }
 
 function streamQualityLabel(stream: MediaStream | null): string {
@@ -222,6 +224,7 @@ export function ScreenStage({
   userVolumes = {},
   onSetUserVolume,
   onExitScreenStage,
+  screenShareWaitPeerId = null,
 }: ScreenStageProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -272,6 +275,11 @@ export function ScreenStage({
   if (!showingShare) {
     const others = players.filter((p) => p.id !== myId);
     const waitingAlone = players.length === 0 || others.length === 0;
+    const pendingSharer = screenShareWaitPeerId
+      ? players.find((p) => p.id === screenShareWaitPeerId)
+      : players.find(
+          (p) => p.id !== myId && p.isSharingScreen && p.id !== liveScreenPeerId
+        );
 
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -280,6 +288,17 @@ export function ScreenStage({
             waitingAlone ? "items-center justify-center" : "items-stretch justify-start md:items-center md:justify-center"
           }`}
         >
+          {pendingSharer && (
+            <div
+              className="mx-auto mb-4 max-w-lg rounded-lg border border-[#ed4245]/40 bg-[#ed4245]/10 px-4 py-3 text-center text-sm text-[#f2f3f5]"
+              role="status"
+            >
+              <p className="font-medium text-white">
+                {t.someonesScreen.replace("{name}", pendingSharer.name)}
+              </p>
+              <p className="mt-1 text-[#b5bac1]">{t.screenShareConnecting}</p>
+            </div>
+          )}
           {waitingAlone ? (
             <>
               {players.length > 0 && (

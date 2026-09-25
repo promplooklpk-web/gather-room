@@ -17,26 +17,43 @@ import type { ConnectionQuality } from "@/lib/types";
  * even on a local LAN. Default config is STUN-only; TURN is added only
  * when we recreate the Peer with `forceRelay` after data ICE fails.
  */
+/** Optional dedicated TURN from build-time env (see README). */
+export function optionalTurnFromEnv(): RTCIceServer | null {
+  const urls = process.env.NEXT_PUBLIC_TURN_URLS?.trim();
+  if (!urls) return null;
+  const username = process.env.NEXT_PUBLIC_TURN_USERNAME?.trim();
+  const credential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL?.trim();
+  const server: RTCIceServer = {
+    urls: urls.includes(",")
+      ? urls.split(",").map((u) => u.trim()).filter(Boolean)
+      : urls,
+  };
+  if (username) server.username = username;
+  if (credential) server.credential = credential;
+  return server;
+}
+
+const PEERJS_PUBLIC_TURN: RTCIceServer = {
+  urls: [
+    "turn:us-0.turn.peerjs.com:3478",
+    "turn:us-0.turn.peerjs.com:3478?transport=tcp",
+    "turn:eu-0.turn.peerjs.com:3478",
+    "turn:eu-0.turn.peerjs.com:3478?transport=tcp",
+  ],
+  username: "peerjs",
+  credential: "peerjsp",
+};
+
 export function iceServers(opts?: { turn?: boolean }): RTCIceServer[] {
   const stun: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun.cloudflare.com:3478" },
   ];
+  const fromEnv = optionalTurnFromEnv();
+  if (fromEnv) stun.push(fromEnv);
   if (!opts?.turn) return stun;
-  return [
-    ...stun,
-    {
-      urls: [
-        "turn:us-0.turn.peerjs.com:3478",
-        "turn:us-0.turn.peerjs.com:3478?transport=tcp",
-        "turn:eu-0.turn.peerjs.com:3478",
-        "turn:eu-0.turn.peerjs.com:3478?transport=tcp",
-      ],
-      username: "peerjs",
-      credential: "peerjsp",
-    },
-  ];
+  return [...stun, PEERJS_PUBLIC_TURN];
 }
 
 export function getPeerOptions(forceRelay = false): PeerJSOption {
@@ -98,6 +115,49 @@ export function probeUdpBlocked(timeoutMs = 2000): Promise<boolean> {
     }
     window.setTimeout(() => finish(true), timeoutMs);
   });
+}
+
+/** Add or replace the screen video track on an existing mesh audio PeerConnection. */
+export function attachScreenTrackToPeerConnection(
+  pc: RTCPeerConnection,
+  screenStream: MediaStream
+): boolean {
+  const videoTrack = screenStream.getVideoTracks()[0];
+  if (!videoTrack) return false;
+  const videoSender = pc
+    .getSenders()
+    .find((s) => s.track?.kind === "video");
+  if (videoSender) {
+    void videoSender.replaceTrack(videoTrack);
+  } else {
+    pc.addTrack(videoTrack, screenStream);
+  }
+  constrainScreenSenders(pc);
+  return true;
+}
+
+export function detachScreenTrackFromPeerConnection(
+  pc: RTCPeerConnection | undefined
+): void {
+  if (!pc) return;
+  pc.getSenders().forEach((sender) => {
+    if (sender.track?.kind === "video") {
+      void sender.replaceTrack(null);
+    }
+  });
+}
+
+export function audioPcHasDisplayableScreen(
+  pc?: RTCPeerConnection | null
+): boolean {
+  if (!pc) return false;
+  try {
+    return pc
+      .getReceivers()
+      .some((r) => r.track?.kind === "video" && videoTrackIsDisplayable(r.track));
+  } catch {
+    return false;
+  }
 }
 
 /** Keep screen-share bitrate low enough to survive TCP TURN. */

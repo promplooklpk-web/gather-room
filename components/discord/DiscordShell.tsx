@@ -58,6 +58,7 @@ function VoiceRoomSession({
     isSharing,
     remoteScreen,
     localScreen,
+    screenShareWaitPeerId,
     messages,
     speakingPeers,
     userVolumes,
@@ -137,6 +138,8 @@ function VoiceRoomSession({
 
   const roomLabel = `${room.labelTh} / ${room.label}`;
   const userColor = myPlayer?.color ?? "#5865f2";
+  const liveScreenPeerId =
+    remoteScreen?.peerId ?? (isSharing && localScreen ? myId : null);
   const showConnectionBanner = shouldShowConnectionBanner(
     connectionStatus,
     presenceSyncStatus,
@@ -163,6 +166,7 @@ function VoiceRoomSession({
     userName,
     userColor,
     speakingPeers,
+    liveScreenPeerId,
     onSelectRoom: (id: string) => {
       onSelectRoom(id);
       setIsMobileSidebarOpen(false);
@@ -314,6 +318,7 @@ function VoiceRoomSession({
             userVolumes={userVolumes}
             onSetUserVolume={setUserVolume}
             onExitScreenStage={exitScreenStage}
+            screenShareWaitPeerId={screenShareWaitPeerId}
           />
 
           <FloatingControlBar
