@@ -5,7 +5,7 @@ const baseStunCount = 3;
 
 assert.equal(iceServers().length, baseStunCount);
 assert.equal(iceServers({ turn: false }).length, baseStunCount);
-assert.equal(iceServers({ turn: true }).length, baseStunCount + 1);
+assert.equal(iceServers({ turn: true }).length, baseStunCount + 2);
 
 const turnUrls = iceServers({ turn: true }).find(
   (s) =>

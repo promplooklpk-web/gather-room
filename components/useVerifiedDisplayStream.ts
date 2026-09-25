@@ -37,12 +37,12 @@ export function useVerifiedDisplayStream(
     };
 
     const hasFrames = () =>
-      mediaStreamIsDisplayable(stream) &&
+      mediaStreamIsDisplayable(stream, { allowMutedCapture: true }) &&
       video.videoWidth > 0 &&
       video.videoHeight > 0;
 
     const poll = () => {
-      if (!mediaStreamIsDisplayable(stream)) {
+      if (!mediaStreamIsDisplayable(stream, { allowMutedCapture: true })) {
         invalidate();
         return;
       }

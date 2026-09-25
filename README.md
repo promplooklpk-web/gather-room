@@ -74,7 +74,19 @@ Optional WebRTC TURN (for strict VPN / symmetric NAT when the built-in PeerJS TU
 | `NEXT_PUBLIC_TURN_USERNAME` | TURN username (if required) |
 | `NEXT_PUBLIC_TURN_CREDENTIAL` | TURN password (if required) |
 
-Screen share uses the same ICE servers as voice. If UDP is blocked (common on VPN), the app probes STUN, may recreate the Peer with TURN (`iceTransportPolicy: relay`), and reuses the **audio** PeerConnection for screen video when possible so a working voice path carries the share.
+Screen share uses the same ICE servers as voice. If UDP is blocked (common on VPN), the app probes STUN, may recreate the Peer with TURN (`iceTransportPolicy: relay`), and reuses the **audio** PeerConnection for screen video when possible so a working voice path carries the share. After a TURN fallback, you must tap **Share screen** again — browsers only allow `getDisplayMedia` from a fresh user gesture.
+
+### Meet / Gather.town–class reliability (roadmap)
+
+This app uses a **PeerJS mesh** (one WebRTC connection per pair). Google Meet and Gather.town use an **SFU** (or MCU): one upstream per client, TURN always on, and screen video does not depend on a second P2P leg. For production-grade VPN + screen share:
+
+| Approach | Notes |
+|----------|--------|
+| **Dedicated TURN** | Set `NEXT_PUBLIC_TURN_URLS` (+ username/credential) in CI — e.g. [Metered](https://www.metered.ca/tools/openrelay/), Cloudflare Calls TURN, or your own `coturn`. |
+| **SFU** | [LiveKit](https://livekit.io/), [Cloudflare Calls](https://developers.cloudflare.com/calls/), or Daily — replace mesh `peer.call` with one `RTCPeerConnection` to the SFU and `replaceTrack` for screen. |
+| **This repo** | Mesh + optional TURN is fine for small rooms; document limits in support copy when video never arrives after relay. |
+
+Copy `.env.example` into `.env.local` for local TURN testing.
 
 ### QA: screen share behind restrictive network
 

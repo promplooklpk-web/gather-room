@@ -44,6 +44,18 @@ const PEERJS_PUBLIC_TURN: RTCIceServer = {
   credential: "peerjsp",
 };
 
+/** Free community TURN (rate-limited); used only when relay mode is on. */
+const OPENRELAY_TURN: RTCIceServer = {
+  urls: [
+    "turn:openrelay.metered.ca:80",
+    "turn:openrelay.metered.ca:80?transport=tcp",
+    "turn:openrelay.metered.ca:443",
+    "turns:openrelay.metered.ca:443?transport=tcp",
+  ],
+  username: "openrelayproject",
+  credential: "openrelayproject",
+};
+
 export function iceServers(opts?: { turn?: boolean }): RTCIceServer[] {
   const stun: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
@@ -53,7 +65,9 @@ export function iceServers(opts?: { turn?: boolean }): RTCIceServer[] {
   const fromEnv = optionalTurnFromEnv();
   if (fromEnv) stun.push(fromEnv);
   if (!opts?.turn) return stun;
-  return [...stun, PEERJS_PUBLIC_TURN];
+  const turnServers: RTCIceServer[] = [PEERJS_PUBLIC_TURN];
+  if (!fromEnv) turnServers.push(OPENRELAY_TURN);
+  return [...stun, ...turnServers];
 }
 
 export function getPeerOptions(forceRelay = false): PeerJSOption {
@@ -118,19 +132,33 @@ export function probeUdpBlocked(timeoutMs = 2000): Promise<boolean> {
 }
 
 /** Add or replace the screen video track on an existing mesh audio PeerConnection. */
-export function attachScreenTrackToPeerConnection(
+export async function attachScreenTrackToPeerConnection(
   pc: RTCPeerConnection,
-  screenStream: MediaStream
-): boolean {
+  screenStream: MediaStream,
+  micStream?: MediaStream | null
+): Promise<boolean> {
   const videoTrack = screenStream.getVideoTracks()[0];
   if (!videoTrack) return false;
+  const micTrack = micStream?.getAudioTracks()[0];
   const videoSender = pc
     .getSenders()
     .find((s) => s.track?.kind === "video");
-  if (videoSender) {
-    void videoSender.replaceTrack(videoTrack);
-  } else {
-    pc.addTrack(videoTrack, screenStream);
+  try {
+    if (videoSender) {
+      await videoSender.replaceTrack(videoTrack);
+    } else {
+      pc.addTrack(videoTrack, screenStream);
+    }
+    if (micTrack) {
+      const audioSender = pc.getSenders().find((s) => s.track?.kind === "audio");
+      if (audioSender && audioSender.track?.id !== micTrack.id) {
+        await audioSender.replaceTrack(micTrack);
+      } else if (!audioSender) {
+        pc.addTrack(micTrack, micStream ?? new MediaStream([micTrack]));
+      }
+    }
+  } catch {
+    return false;
   }
   constrainScreenSenders(pc);
   return true;
@@ -286,17 +314,26 @@ export function callHasLiveVideo(call?: MediaConnection | null): boolean {
 
 /** Remote screen is only displayable while the stream is active and video is unmuted/live. */
 export function mediaStreamIsDisplayable(
-  stream: MediaStream | null | undefined
+  stream: MediaStream | null | undefined,
+  opts?: { allowMutedCapture?: boolean }
 ): boolean {
   if (!stream?.active) return false;
   const tracks = stream.getVideoTracks();
   if (tracks.length === 0) return false;
-  return tracks.some((t) => videoTrackIsDisplayable(t));
+  return tracks.some((t) => videoTrackIsDisplayable(t, opts));
 }
 
-export function videoTrackIsDisplayable(track: MediaStreamTrack): boolean {
+/**
+ * @param allowMutedCapture — Chrome often keeps `muted: true` on getDisplayMedia
+ * tracks until the first frame; treat as displayable while waiting for frames.
+ */
+export function videoTrackIsDisplayable(
+  track: MediaStreamTrack,
+  opts?: { allowMutedCapture?: boolean }
+): boolean {
   if (track.kind !== "video") return false;
-  if (track.readyState !== "live" || track.muted || !track.enabled) return false;
+  if (track.readyState !== "live" || !track.enabled) return false;
+  if (track.muted && !opts?.allowMutedCapture) return false;
   const settings = track.getSettings?.();
   if (settings && (settings.width === 0 || settings.height === 0)) return false;
   return true;
@@ -335,10 +372,14 @@ export function waitForDisplayableStream(
       resolve(ok);
     };
 
-    const hasFrames = () =>
-      mediaStreamIsDisplayable(stream) &&
-      video.videoWidth > 0 &&
-      video.videoHeight > 0;
+    const hasFrames = () => {
+      const track = stream.getVideoTracks()[0];
+      const trackOk =
+        track &&
+        videoTrackIsDisplayable(track, { allowMutedCapture: true }) &&
+        stream.active;
+      return trackOk && video.videoWidth > 0 && video.videoHeight > 0;
+    };
 
     const check = () => {
       if (hasFrames()) finish(true);
@@ -348,7 +389,11 @@ export function waitForDisplayableStream(
     video.addEventListener("resize", check);
     stream.getVideoTracks().forEach((track) => {
       track.addEventListener("ended", () => finish(false));
-      track.addEventListener("mute", () => finish(false));
+      // Screen capture tracks may fire `mute` before the first frame — wait for timeout.
+      track.addEventListener("mute", () => {
+        if (!hasFrames()) return;
+        finish(false);
+      });
     });
     stream.addEventListener("inactive", () => finish(false));
 
