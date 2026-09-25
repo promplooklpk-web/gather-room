@@ -41,6 +41,11 @@ export const t = {
   sharingActive: "กำลังแชร์หน้าจอของคุณ",
   sharingTheirScreen: "กำลังแชร์หน้าจอ",
   waitingForShare: "รอหน้าจอจากเพื่อน — แตะหน้าจอถ้าภาพไม่ขึ้น",
+  screenShareConnecting:
+    "เพื่อนกำลังแชร์หน้าจอ — กำลังเชื่อมต่อวิดีโอ… ถ้าใช้ VPN อาจต้องปิด VPN หรือรอให้ระบบสลับไป TURN",
+  screenShareVpnHint:
+    "เชื่อมต่อวิดีโอแชร์หน้าจอไม่สำเร็จ — มักเกิดเมื่อใช้ VPN หรือเครือข่ายบล็อก WebRTC ลองปิด VPN กด «เชื่อมต่อใหม่» หรือให้ผู้แชร์ปิด VPN แล้วแชร์อีกครั้ง",
+  screenShareAnnounced: "แชร์",
   tapToPlayVideo: "แตะเพื่อดูวิดีโอ",
   tapToUnmuteAudio: "แตะเพื่อเปิดเสียง",
   micDenied:

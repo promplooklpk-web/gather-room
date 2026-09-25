@@ -66,6 +66,23 @@ Pushes to `main` run `.github/workflows/deploy.yml`: `npm run build` (static exp
 
 Build-time env (already set in the workflow): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 
+Optional WebRTC TURN (for strict VPN / symmetric NAT when the built-in PeerJS TURN fallback is not enough):
+
+| Variable | Purpose |
+|----------|---------|
+| `NEXT_PUBLIC_TURN_URLS` | Comma-separated `turn:` / `turns:` URLs |
+| `NEXT_PUBLIC_TURN_USERNAME` | TURN username (if required) |
+| `NEXT_PUBLIC_TURN_CREDENTIAL` | TURN password (if required) |
+
+Screen share uses the same ICE servers as voice. If UDP is blocked (common on VPN), the app probes STUN, may recreate the Peer with TURN (`iceTransportPolicy: relay`), and reuses the **audio** PeerConnection for screen video when possible so a working voice path carries the share.
+
+### QA: screen share behind restrictive network
+
+1. Two browsers in the same room (mic working in both).
+2. Tab A: start screen share; Tab B should see the stage within a few seconds.
+3. Tab A on a VPN that blocks UDP: expect the orange **แชร์** badge and Thai “กำลังเชื่อมต่อวิดีโอ…” banner on Tab B; after relay fallback, video should appear if TURN can connect.
+4. If video never arrives after ~18s, Tab B shows a VPN/WebRTC hint; try **เชื่อมต่อใหม่** or disable VPN on the sharer.
+
 Local deploy after `npm run build`:
 
 ```bash

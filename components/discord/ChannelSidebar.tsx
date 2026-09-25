@@ -26,6 +26,8 @@ interface ChannelSidebarProps {
   userName: string;
   userColor: string;
   speakingPeers?: Record<string, boolean>;
+  /** Peer with verified screen frames on the stage (red LIVE badge). */
+  liveScreenPeerId?: string | null;
   onSelectRoom: (roomId: string) => void;
   onToggleMute: () => void;
   onToggleDeafen: () => void;
@@ -46,7 +48,8 @@ function memberList(
     disconnected?: boolean;
   }>,
   myId: string | null,
-  speakingPeers: Record<string, boolean>
+  speakingPeers: Record<string, boolean>,
+  liveScreenPeerId: string | null = null
 ) {
   return members.map((p) => {
     const isSpeaking = Boolean(speakingPeers[p.id]);
@@ -71,9 +74,14 @@ function memberList(
           {p.name}
           {p.id === myId ? ` ${t.you}` : ""}
         </span>
-        {p.isSharingScreen && (
+        {p.isSharingScreen && liveScreenPeerId === p.id && (
           <span className="rounded bg-[#ed4245] px-1 py-px text-[9px] font-bold tracking-wide text-white">
             {t.live}
+          </span>
+        )}
+        {p.isSharingScreen && liveScreenPeerId !== p.id && (
+          <span className="rounded bg-[#faa61a]/90 px-1 py-px text-[9px] font-bold tracking-wide text-[#1e1f22]">
+            {t.screenShareAnnounced}
           </span>
         )}
       </li>
@@ -100,6 +108,7 @@ export function ChannelSidebar({
   userName,
   userColor,
   speakingPeers = {},
+  liveScreenPeerId = null,
   onSelectRoom,
   onToggleMute,
   onToggleDeafen,
@@ -159,7 +168,12 @@ export function ChannelSidebar({
                 </button>
                 {showMembers && (
                   <ul className="ml-6 mt-0.5 space-y-0.5">
-                    {memberList(members, myId, active ? speakingPeers : {})}
+                    {memberList(
+                      members,
+                      myId,
+                      active ? speakingPeers : {},
+                      active ? liveScreenPeerId : null
+                    )}
                   </ul>
                 )}
               </li>
