@@ -131,7 +131,11 @@ export function probeUdpBlocked(timeoutMs = 2000): Promise<boolean> {
   });
 }
 
-/** Add or replace the screen video track on an existing mesh audio PeerConnection. */
+/**
+ * Add or replace the screen video track on an existing mesh audio PeerConnection.
+ * Not used for outbound share: PeerJS does not handle `negotiationneeded`, so remotes
+ * would not receive video without a dedicated screen MediaConnection.
+ */
 export async function attachScreenTrackToPeerConnection(
   pc: RTCPeerConnection,
   screenStream: MediaStream,

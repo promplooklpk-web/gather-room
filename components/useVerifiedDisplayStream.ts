@@ -59,7 +59,11 @@ export function useVerifiedDisplayStream(
     video.addEventListener("loadeddata", poll);
     stream.getVideoTracks().forEach((track) => {
       track.addEventListener("ended", invalidate);
-      track.addEventListener("mute", invalidate);
+      // Screen capture often stays `muted` until the first frame — same as waitForDisplayableStream.
+      track.addEventListener("mute", () => {
+        if (!hasFrames()) return;
+        invalidate();
+      });
     });
     stream.addEventListener("inactive", invalidate);
     void video.play().catch(() => invalidate());
