@@ -50,7 +50,22 @@ export const t = {
   tapToUnmuteAudio: "แตะเพื่อเปิดเสียง",
   micDenied:
     "ไม่สามารถใช้ไมค์ได้ — กรุณาอนุญาตไมโครโฟน / Microphone access denied.",
-  screenDenied: "ไม่สามารถแชร์หน้าจอได้ / Screen share denied.",
+  screenDenied:
+    "ไม่สามารถแชร์หน้าจอได้ — กรุณาอนุญาตการแชร์หน้าจอในเบราว์เซอร์ / Screen share blocked. Allow screen capture in browser settings.",
+  screenShareCancelled:
+    "ยกเลิกการแชร์หน้าจอ — กด «แชร์หน้าจอ»อีกครั้งเมื่อพร้อม / Screen share cancelled. Tap Share again when ready.",
+  screenShareInsecure:
+    "แชร์หน้าจอต้องใช้ HTTPS — เปิดลิงก์ gather-room แบบปลอดภัย / Screen share requires a secure (HTTPS) page.",
+  screenShareBusy:
+    "ไม่สามารถจับภาพหน้าจอได้ — ปิดแอปที่กำลังแคปหน้าจออยู่ หรือลองใหม่ / Could not capture display (another app may be sharing).",
+  screenShareUnknown:
+    "เริ่มแชร์หน้าจอไม่สำเร็จ — ลองกดอีกครั้งหรือรีเฟรชหน้า / Could not start screen share. Try again.",
+  screenShareStreamNotReady:
+    "ไม่สามารถแชร์หน้าจอได้ — สตรีมหน้าจอไม่พร้อม (ลองเลือกหน้าต่างอื่น) / Screen stream not ready. Try another window or display.",
+  screenShareTapAgainAfterRelay:
+    "เชื่อมต่อผ่าน TURN แล้ว — กด «แชร์หน้าจอ»อีกครั้งเพื่อเลือกหน้าจอ / TURN is ready. Tap Share screen again to pick a display.",
+  screenShareNetworkHint:
+    "แชร์หน้าจอสำเร็จแต่เพื่อนอาจไม่เห็นภาพ — มักเกิดจาก VPN/เครือข่าย ลอง «เชื่อมต่อใหม่» / Share started but viewers may not get video on VPN — try Reconnect.",
   connectionError: "เชื่อมต่อไม่สำเร็จ / Connection failed. ลองรีเฟรชหน้า",
   inRoom: "อยู่ในห้อง",
   live: "LIVE",

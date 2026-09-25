@@ -53,6 +53,10 @@ import {
 import { isPresenceDiscoveryEnabled } from "@/lib/supabaseClient";
 import { flushVoicePresence, purgeVoicePeer, startVoicePresence } from "@/lib/voicePresence";
 import { isDialableMeshPeerId } from "@/lib/voicePeerIds";
+import {
+  displayMediaErrorMessage,
+  isSecureDisplayMediaContext,
+} from "@/lib/displayMedia";
 import { t } from "@/lib/i18n";
 import { useDebouncedConnectionStatus } from "@/hooks/useDebouncedConnectionStatus";
 import type {
@@ -99,6 +103,16 @@ function isRtcHealthy(pc?: RTCPeerConnection) {
   const ice = pc.iceConnectionState;
   const conn = pc.connectionState;
   return ice === "connected" || ice === "completed" || conn === "connected";
+}
+
+function meshHasHealthyAudio(
+  remotes: Map<string, RemotePeer>
+): boolean {
+  for (const remote of remotes.values()) {
+    const pc = remote.audioCall?.peerConnection as RTCPeerConnection | undefined;
+    if (isMediaCallLive(remote.audioCall) && isRtcHealthy(pc)) return true;
+  }
+  return false;
 }
 
 interface RemotePeer {
@@ -210,7 +224,8 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   const skippedPeerUntilRef = useRef<Map<string, number>>(new Map());
   const localPeerOpenRef = useRef(false);
   const screenIceFailRef = useRef(0);
-  const resumeScreenShareAfterRelayRef = useRef(false);
+  /** After relay recreate, user must tap Share again (gesture required for getDisplayMedia). */
+  const pendingScreenShareAfterRelayRef = useRef(false);
   const [screenShareWaitPeerId, setScreenShareWaitPeerId] = useState<
     string | null
   >(null);
@@ -388,9 +403,7 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         tryAttachScreenFromStream(stream);
       });
 
-      call.on("stream", (remoteStream) => {
-        tryAttachScreenFromStream(remoteStream);
-
+      const attachRemoteAudioFromStream = (remoteStream: MediaStream) => {
         const audioTracks = remoteStream.getAudioTracks();
         if (audioTracks.length === 0) return;
         const localTrackId = localStreamRef.current?.getAudioTracks()[0]?.id;
@@ -404,7 +417,6 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
         attachRemoteAudioStream(remote!.audioEl, remoteStream);
         void playRemoteAudio(remote!.audioEl!);
 
-        // Audio monitoring for remote speaking indicator
         remote!.audioMonitor?.stop();
         remote!.audioMonitor = monitorAudioStream(remoteStream, (speaking) => {
           setSpeakingPeers((prev) => {
@@ -412,6 +424,11 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
             return { ...prev, [remoteId]: speaking };
           });
         });
+      };
+
+      call.on("stream", (remoteStream) => {
+        tryAttachScreenFromStream(remoteStream);
+        attachRemoteAudioFromStream(remoteStream);
       });
 
       const clearIfCurrent = () => {
@@ -883,59 +900,69 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
     [handleSignalingMessage, collectRoster, myPeerInfo, updatePlayer]
   );
 
-  const startScreenCallToPeer = useCallback((remoteId: string, force = false) => {
-    const peer = peerRef.current;
-    const screenStream = screenStreamRef.current;
-    if (!peer || !screenStream) return;
+  const startScreenCallToPeer = useCallback(
+    async (remoteId: string, force = false) => {
+      const peer = peerRef.current;
+      const screenStream = screenStreamRef.current;
+      if (!peer || !screenStream) return;
 
-    const remote = remotesRef.current.get(remoteId);
-    if (!remote) return;
-    if (
-      !force &&
-      (isMediaCallLive(remote.screenCall) || remote.screenOnAudioPc)
-    ) {
-      return;
-    }
-
-    const audioPc = remote.audioCall?.peerConnection as
-      | RTCPeerConnection
-      | undefined;
-    if (
-      audioPc &&
-      isRtcHealthy(audioPc) &&
-      attachScreenTrackToPeerConnection(audioPc, screenStream)
-    ) {
-      remote.screenOnAudioPc = true;
-      try {
-        remote.screenCall?.close();
-      } catch {
-        /* separate screen call no longer needed */
+      const remote = remotesRef.current.get(remoteId);
+      if (!remote) return;
+      if (
+        !force &&
+        (isMediaCallLive(remote.screenCall) || remote.screenOnAudioPc)
+      ) {
+        return;
       }
-      remote.screenCall = undefined;
-      return;
-    }
 
-    remote.screenOnAudioPc = false;
-    remote.screenCall?.close();
-    const call = peer.call(remoteId, screenStream, { metadata: SCREEN_CALL_META });
-    if (!call) return;
+      const audioPc = remote.audioCall?.peerConnection as
+        | RTCPeerConnection
+        | undefined;
+      if (audioPc && isRtcHealthy(audioPc)) {
+        const attached = await attachScreenTrackToPeerConnection(
+          audioPc,
+          screenStream,
+          localStreamRef.current
+        );
+        if (attached) {
+          remote.screenOnAudioPc = true;
+          try {
+            remote.screenCall?.close();
+          } catch {
+            /* separate screen call no longer needed */
+          }
+          remote.screenCall = undefined;
+          return;
+        }
+      }
 
-    remote.screenCall = call;
-    constrainScreenSenders(call.peerConnection as RTCPeerConnection | undefined);
-    watchRtcIce(call.peerConnection as RTCPeerConnection | undefined, () => {
-      onIceFailureRef.current("screen");
-    });
-    call.on("close", () => {
-      if (remote.screenCall === call) remote.screenCall = undefined;
-    });
-    call.on("error", () => {
-      if (remote.screenCall === call) remote.screenCall = undefined;
-    });
-  }, []);
+      remote.screenOnAudioPc = false;
+      remote.screenCall?.close();
+      const call = peer.call(remoteId, screenStream, {
+        metadata: SCREEN_CALL_META,
+      });
+      if (!call) return;
+
+      remote.screenCall = call;
+      constrainScreenSenders(
+        call.peerConnection as RTCPeerConnection | undefined
+      );
+      watchRtcIce(call.peerConnection as RTCPeerConnection | undefined, () => {
+        onIceFailureRef.current("screen");
+      });
+      call.on("close", () => {
+        if (remote.screenCall === call) remote.screenCall = undefined;
+      });
+      call.on("error", () => {
+        if (remote.screenCall === call) remote.screenCall = undefined;
+      });
+    },
+    []
+  );
 
   const startScreenCallsToAll = useCallback(() => {
     remotesRef.current.forEach((remote) => {
-      startScreenCallToPeer(remote.info.id);
+      void startScreenCallToPeer(remote.info.id);
     });
   }, [startScreenCallToPeer]);
 
@@ -1044,15 +1071,28 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
   }, [resetLocalShareState, clearRemoteScreen, isSharing]);
 
   const startScreenShare = useCallback(async (opts?: { skipVpnProbe?: boolean }) => {
-    if (!opts?.skipVpnProbe && !forceRelayRef.current) {
-      const blocked = await probeUdpBlocked(2000);
+    setError((prev) =>
+      prev === t.screenShareTapAgainAfterRelay ? null : prev
+    );
+
+    if (!isSecureDisplayMediaContext()) {
+      setError(t.screenShareInsecure);
+      return;
+    }
+
+    if (
+      !opts?.skipVpnProbe &&
+      !forceRelayRef.current &&
+      !meshHasHealthyAudio(remotesRef.current)
+    ) {
+      const blocked = await probeUdpBlocked(2800);
       if (blocked) {
-        resumeScreenShareAfterRelayRef.current = true;
+        pendingScreenShareAfterRelayRef.current = true;
         switchToRelayRef.current();
         return;
       }
     }
-    resetLocalShareState();
+
     try {
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: {
@@ -1061,25 +1101,22 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
           height: { ideal: 720, max: 720 },
         },
         audio: false,
-      });
+        preferCurrentTab: false,
+      } as DisplayMediaStreamOptions);
+
+      resetLocalShareState();
 
       const videoTrack = screenStream.getVideoTracks()[0];
       if (!videoTrack) {
-        screenStream.getTracks().forEach((t) => t.stop());
-        resetLocalShareState();
-        setError(
-          "ไม่สามารถแชร์หน้าจอได้ — ไม่พบวิดีโอจากหน้าจอ / No video track from screen capture."
-        );
+        screenStream.getTracks().forEach((tr) => tr.stop());
+        setError(t.screenShareStreamNotReady);
         return;
       }
 
-      const displayable = await waitForDisplayableStream(screenStream, 3000);
+      const displayable = await waitForDisplayableStream(screenStream, 5000);
       if (!displayable) {
-        screenStream.getTracks().forEach((t) => t.stop());
-        resetLocalShareState();
-        setError(
-          "ไม่สามารถแชร์หน้าจอได้ — สตรีมหน้าจอไม่พร้อมใช้งาน / Screen stream not available."
-        );
+        screenStream.getTracks().forEach((tr) => tr.stop());
+        setError(t.screenShareStreamNotReady);
         return;
       }
 
@@ -1101,10 +1138,28 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       }
       flushVoicePresenceRef.current();
       screenIceFailRef.current = 0;
-    } catch {
+
+      if (forceRelayRef.current) {
+        window.setTimeout(() => {
+          const anyViewer = Array.from(remotesRef.current.values()).some(
+            (r) => r.screenOnAudioPc || isMediaCallLive(r.screenCall)
+          );
+          if (screenStreamRef.current && !anyViewer && remotesRef.current.size > 0) {
+            setError((prev) => prev ?? t.screenShareNetworkHint);
+          }
+        }, 12_000);
+      }
+    } catch (err) {
       resetLocalShareState();
       setError(
-        "ไม่สามารถแชร์หน้าจอได้ — กรุณาอนุญาตการแชร์หน้าจอ / Screen share denied. Please allow screen sharing."
+        displayMediaErrorMessage(err, {
+          denied: t.screenDenied,
+          cancelled: t.screenShareCancelled,
+          insecure: t.screenShareInsecure,
+          busy: t.screenShareBusy,
+          unsupported: t.screenShareUnknown,
+          unknown: t.screenShareUnknown,
+        })
       );
     }
   }, [broadcast, startScreenCallsToAll, updatePlayer, resetLocalShareState]);
@@ -1511,9 +1566,9 @@ export function usePeerRoom({ name, roomId, enabled }: UsePeerRoomOptions) {
       }
 
       screenIceFailRef.current = 0;
-      if (resumeScreenShareAfterRelayRef.current) {
-        resumeScreenShareAfterRelayRef.current = false;
-        void startScreenShareRef.current({ skipVpnProbe: true });
+      if (pendingScreenShareAfterRelayRef.current) {
+        pendingScreenShareAfterRelayRef.current = false;
+        setError(t.screenShareTapAgainAfterRelay);
       } else if (screenStreamRef.current) {
         remotesRef.current.forEach((remote) => {
           startScreenCallToPeerRef.current(remote.info.id, true);
